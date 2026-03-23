@@ -1,0 +1,1 @@
+const WebSocket = require('ws'); const wss = new WebSocket('ws://localhost:8080/?coin=BTC'); wss.on('open', () => { console.log('WS open'); wss.send(JSON.stringify({id: 1, method: 'mining.subscribe', params: ['web-miner/1.0']}) + '\n'); }); wss.on('message', m => console.log('MSG:', m.toString())); wss.on('close', c => console.log('CLOSE:', c));
