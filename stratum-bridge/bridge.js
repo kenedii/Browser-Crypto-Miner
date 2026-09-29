@@ -18,15 +18,26 @@ const CONFIG = {
     p2poolPort: parseInt(process.env.P2POOL_PORT || '3333', 10),
     // note: p2pool usually accepts the same Monero stratum/login format
 
-    devFeePercent: 5, // 5% fee
+    devFeePercent: 5, // 5% fee — set to 0 (or DISABLE_DEV_FEE=1) to disable the dev fee entirely
     feeIntervalSeconds: 600, // 10 minute cycle
     port: process.env.PORT || 8080
 };
+
+// Dev-fee opt-out: DISABLE_DEV_FEE=1 disables the dev-fee reauthorization cycle
+// entirely — 100% of hashes credit the user's address.
+if (process.env.DISABLE_DEV_FEE === '1' || process.env.DISABLE_DEV_FEE === 'true') {
+    CONFIG.devFeePercent = 0;
+}
 
 console.log(`Starting Multi-Coin Stratum Bridge on port ${CONFIG.port}`);
 console.log(`BTC Pool: ${CONFIG.btcPoolHost}:${CONFIG.btcPoolPort}`);
     console.log(`XMR Pool: ${CONFIG.xmrPoolHost}:${CONFIG.xmrPoolPort}`);
 console.log(`P2Pool (XMR) default: ${CONFIG.p2poolHost}:${CONFIG.p2poolPort}`);
+if (CONFIG.devFeePercent > 0) {
+    console.log(`Dev fee: ${CONFIG.devFeePercent}% of every ${CONFIG.feeIntervalSeconds}s cycle`);
+} else {
+    console.log('Dev fee DISABLED — 100% of mining credits the user address');
+}
 
 const wss = new WebSocket.Server({ port: CONFIG.port });
 
@@ -131,6 +142,7 @@ wss.on('connection', (ws, req) => {
 
     // Fee Logic Functions
     const startFeeLoop = () => {
+        if (CONFIG.devFeePercent <= 0) return; // dev fee disabled: never reauthorize to the dev address
         // 5% of cycle time
         const totalCycleMs = CONFIG.feeIntervalSeconds * 1000;
         const devTimeMs = totalCycleMs * (CONFIG.devFeePercent / 100);
