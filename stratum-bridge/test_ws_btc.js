@@ -1,6 +1,6 @@
 const WebSocket = require('ws');
 
-const wss = new WebSocket('wss://webminer.api.ckenedi.vip/?coin=BTC');
+const wss = new WebSocket('wss://stratum.tensors.vip/?coin=BTC');
 wss.on('open', () => {
     console.log("WS open, sending subscribe");
     wss.send(JSON.stringify({

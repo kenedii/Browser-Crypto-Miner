@@ -1,0 +1,28 @@
+services:
+  bridge:
+    build: .
+    restart: unless-stopped
+    environment:
+      - PORT=8080
+      - BTC_POOL_HOST=solo.ckpool.org
+      - BTC_POOL_PORT=3333
+      - BTC_DEV_FEE_ADDRESS=1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6
+    expose:
+      - "8080"
+
+  caddy:
+    image: caddy:2
+    restart: unless-stopped
+    depends_on:
+      - bridge
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  caddy_data:
+  caddy_config:

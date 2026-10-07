@@ -1,0 +1,6 @@
+# Caddy reverse proxy for the BTC stratum bridge.
+# Caddy terminates TLS automatically (Let's Encrypt) and proxies the
+# WebSocket upgrade to the node bridge container.
+stratum.tensors.vip {
+    reverse_proxy bridge:8080
+}

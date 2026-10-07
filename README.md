@@ -1,29 +1,27 @@
-# Browser Crypto Miner
+# Browser Bitcoin Miner
 
-A real-time browser-based cryptocurrency miner using WebAssembly (WASM) and WebSocket proxies. Features real Proof-of-Work hashing for Monero via WebRandomX and Bitcoin via a local JavaScript Double-SHA256 solver. Uses a custom Stratum proxy bridging the web socket connections to live cryptocurrency pools while natively supporting continuous cycle "Dev Fees."
+A browser-based Bitcoin (BTC) miner. The web UI runs a pure-JavaScript double-SHA256 proof-of-work solver directly in the browser and talks to a real Bitcoin mining pool through a small WebSocket ⇄ Stratum bridge. A configurable 0.25% dev fee is supported.
 
 ## Project Structure
 
-- `mine-crypto.html`: The main user interface and mining execution script for running WebWorkers.
-- `miner.js`: Bitcoin hash solver for real difficulty target checks.
-- `stratum-bridge/`: Custom Node.js bridge translating WebSocket instructions into standard TCP JSON-RPC for pool communication. Siphons connection periodically for the Dev Fee.
-- `WebRandomX/`: WASM compiled RandomX implementation running in the browser.
-- `WRXProxy/`: An earlier fallback proxy implementation.
-- `Dockerfile`: Runs the simple static browser UI via Nginx.
+- `mine-crypto.html`: The static page that loads the miner.
+- `miner.js`: Bitcoin hash solver (double-SHA256) with real difficulty target checks, the mining UI, and the Stratum-over-WebSocket client.
+- `stratum-bridge/`: Node.js WebSocket ⇄ Stratum TCP bridge for Bitcoin, including the dev-fee cycle.
+- `Dockerfile`: Multi-stage build that de-comments/minifies the frontend and serves it with Nginx.
 
 ---
 
 ## 🚀 Running the Frontend
 
-The frontend consists of the UI and WebWorkers. You can deploy it using Docker.
+The frontend is a static page plus a single JavaScript bundle. Build and run it with Docker:
 
 1. **Build the Docker container:**
    ```bash
-   docker build -t browser-crypto-miner-frontend .
+   docker build -t browser-btc-miner-frontend .
    ```
 2. **Run the container:**
    ```bash
-   docker run -p 8080:80 browser-crypto-miner-frontend
+   docker run -p 8080:8080 browser-btc-miner-frontend
    ```
 3. Visit `http://localhost:8080` in your browser.
 
@@ -31,7 +29,7 @@ The frontend consists of the UI and WebWorkers. You can deploy it using Docker.
 
 ## 🌉 Setting up the Stratum Bridge & Dev Fee
 
-The Stratum Bridge dynamically links the browser to Monero (`pool.supportxmr.com:3333`) or Bitcoin (`solo.ckpool.org:3333`) mining pools, seamlessly parsing regular HTTP/WS jobs, while automatically intercepting a scheduled 5% "Dev Fee".
+The Stratum Bridge connects the browser to a Bitcoin pool (default `solo.ckpool.org:3333`) over WebSocket, forwarding Stratum JSON-RPC both ways. For 0.25% of every 10-minute cycle it re-authorizes the upstream connection to the developer BTC address, then switches back to the user's address.
 
 1. **Navigate to the bridge directory:**
    ```bash
@@ -42,12 +40,14 @@ The Stratum Bridge dynamically links the browser to Monero (`pool.supportxmr.com
    npm install
    ```
 3. **Configure Settings:**
-   Inside `bridge.js`, customize your addresses, host ports, and the dev fee percentage. Note the `CONFIG` object handles the fee cycles (default 5% time interval every 10 minutes).
+   Inside `bridge.js`, customize the upstream pool and the dev fee. The `CONFIG` object drives the fee cycle (0.25% of a 600-second window):
    ```javascript
    const CONFIG = {
-     btcDevFeeAddress: "YOUR_BTC_ADDRESS",
-     xmrDevFeeAddress: "YOUR_XMR_ADDRESS",
-     devFeePercent: 5, // 5% fee
+     btcPoolHost: 'solo.ckpool.org',
+     btcPoolPort: 3333,
+     btcDevFeeAddress: '1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6',
+     devFeePercent: 0.25,      // set to 0 to disable the dev fee
+     feeIntervalSeconds: 600,
    };
    ```
 4. **Run the Bridge:**
@@ -57,29 +57,11 @@ The Stratum Bridge dynamically links the browser to Monero (`pool.supportxmr.com
    node bridge.js
    ```
 
+The dev fee can also be disabled at runtime by starting the bridge with `DISABLE_DEV_FEE=1` (or `true`); 100% of mining then credits the user address.
+
 ---
 
-## 🛠 Installing and Compiling WebRandomX
+## ☁️ Deploying
 
-To run Monero's RandomX in a browser, the WebRandomX module needs to be prepared. If you need to make changes to the C++ hashing, follow these compilation instructions.
-
-1. **Prerequisites:**
-   You will need Docker and CMake to compile the WASM code using the Emscripten SDK.
-2. **Navigate to WebRandomX:**
-   ```bash
-   cd WebRandomX
-   ```
-3. **Install Dependencies:**
-   ```bash
-   npm install
-   ```
-4. **Compile using Docker:**
-   ```bash
-   docker run --rm -v $(pwd):/src emscripten/emsdk emcc ... (Add your specific compilation params according to the WebRandomX Makefile/CMakeList)
-   ```
-5. **Pack the JS:**
-   WebRandomX uses Webpack to bundle the WASM module for the frontend:
-   ```bash
-   npx webpack --config webpack/webpack.config.prod.js
-   ```
-   If you simply want to test, the pre-compiled builds have already been verified working in this repository!
+- **Bridge:** runs as a small Node.js container (`stratum-bridge/Dockerfile`) behind a TLS-terminating reverse proxy (e.g. Caddy) on a VPS. See `stratum-bridge/docker-compose.yml`.
+- **Frontend:** the multi-stage `Dockerfile` minifies the assets and serves them with Nginx; deploy as a container to Google Cloud Run.

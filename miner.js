@@ -30,9 +30,8 @@ function runMinerApp() {
     let bindGroup = null;
     let resultBuffer = null;
 
-  // Bridge config
-  // Updated automatically during deployment to point at the Cloud Run stratum bridge
-  const BRIDGE_URL = "wss://webminer.api.ckenedi.vip";
+  // Bridge config - public WebSocket stratum bridge
+  const BRIDGE_URL = "wss://stratum.tensors.vip";
     let stratumWs = null;
 
     // Clear loading message and inject UI
@@ -45,8 +44,6 @@ function runMinerApp() {
           <label for="coin" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Crypto / Pool</label>
           <select id="coin" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
             <option value="BTC" selected>Bitcoin (Solo CKPool)</option>
-            <option value="XMR-SOLO">Monero (Solo Pool)</option>
-            <option value="XMR-P2POOL">Monero (P2Pool Node)</option>
           </select>
         </div>
 
@@ -119,9 +116,9 @@ function runMinerApp() {
           <p>
               In <strong>Simulation Mode</strong>, the miner runs a simplified proof-of-work algorithm using real block data as a seed, but with low difficulty to demonstrate hashing.
               <br><br>
-              In <strong>Network Connected Mode</strong>, the client connects to a custom <strong>Serverless Stratum Bridge</strong> (wss://webminer.api.ckenedi.vip) hosted on Google Cloud Run. This bridge proxies WebSocket traffic directly to <strong>BTC Solo CKPool</strong>, <strong>XMR SupportXMR</strong>, or <strong>Monero P2Pool</strong> via raw TCP. 
+              In <strong>Network Connected Mode</strong>, the client connects to a custom <strong>Stratum Bridge</strong> (wss://stratum.tensors.vip) that proxies WebSocket traffic directly to <strong>BTC Solo CKPool</strong> via raw TCP.
               <br><br>
-              <em>Decentralization Note:</em> While this approach democratizes computation by distributing real network Proof-of-Work (like SHA-256 for BTC or RandomX for XMR via Wasm integration) across many disparate browser instances, it has a limitation. The underlying submitted work routes through one centralized proxy (the bridge). This limits the "true" autonomy compared to running a full node locally, but successfully expands the overall hash pool to browsers.
+              <em>Decentralization Note:</em> While this approach democratizes computation by distributing real network Proof-of-Work (SHA-256 for BTC) across many disparate browser instances, it has a limitation: the underlying submitted work routes through one centralized proxy (the bridge). This limits the "true" autonomy compared to running a full node locally, but successfully expands the overall hash pool to browsers.
           </p>
         </div>
       </div>
@@ -150,25 +147,9 @@ function runMinerApp() {
     };
 
     // UI Event Listeners
-    elements.coin.addEventListener('change', (e) => {
-        const coin = e.target.value;
-        if (coin.startsWith('XMR')) {
-            elements.address.placeholder = "Enter your Monero Address (4...)";
-            elements.networkBlock.title = "Not available for Monero (Simulated)";
-            // Disable GPU for RandomX (it's CPU bound usually, but we could sim)
-            elements.device.innerHTML = '';
-            const cpuOpt = document.createElement('option');
-            cpuOpt.value = 'cpu';
-            const threads = navigator.hardwareConcurrency || 4;
-            cpuOpt.textContent = `CPU (RandomX Hashing) - ${threads} Threads`;
-            cpuOpt.selected = true;
-            elements.device.appendChild(cpuOpt);
-            elements.cpuGroup.style.display = 'block';
-            elements.gpuGroup.style.display = 'none';
-        } else {
-             elements.address.placeholder = "Enter your BTC Address";
-             initDevices(); // Reset to normal detection
-        }
+    elements.coin.addEventListener('change', () => {
+         elements.address.placeholder = "Enter your BTC Address";
+         initDevices();
     });
 
     elements.mode.addEventListener('change', (e) => {
@@ -207,7 +188,6 @@ function runMinerApp() {
 
     // State variables defined at top of function
 
-
     // Simplified SHA256 simulation in WGSL
     const SHADER_CODE = `
       @group(0) @binding(0) var<storage, read_write> result: atomic<u32>;
@@ -239,18 +219,7 @@ function runMinerApp() {
       }
     `;
 
-
     async function fetchNetworkData() {
-        if (elements.coin.value.startsWith('XMR')) {
-            // Fake or limited external API for XMR
-            elements.networkStatus.textContent = elements.mode.value === 'solo' ? "Network Connected" : "Simulated";
-            elements.networkStatus.style.color = "#2196f3";
-            elements.networkBlock.textContent = "N/A"; 
-            elements.networkDiff.textContent = elements.mode.value === 'solo' ? "Waiting for Job" : "Simulated";
-            elements.status.textContent = "Monero Network Support selected";
-            return true;
-        }
-
         elements.status.textContent = "Syncing with Bitcoin Mainnet...";
         try {
             // Get latest block list (returns array of 10 recent blocks)
@@ -303,124 +272,70 @@ function runMinerApp() {
 
     function connectToStratum() {
         return new Promise((resolve, reject) => {
-            const selectedCoinValue = elements.coin.value;
-            // WebRandomX completely overrides Stratum handling for XMR
-            if (selectedCoinValue.startsWith('XMR') && elements.mode.value === 'solo') {
-                elements.status.textContent = "Loading WebRandomX WASM Core...";
-                elements.networkBlock.textContent = "Connecting via WRXProxy...";
-                resolve(true); // Proceed to Start WebRandomX
-                return;
-            }
-
             elements.status.textContent = "Connecting to Stratum Bridge...";
-            const coinParam = selectedCoinValue.split('-')[0];
-            const poolParam = selectedCoinValue.includes('P2POOL') ? '&pool=p2pool' : '';
-            
+
             try {
-                // Pass coin type to bridge
-                stratumWs = new WebSocket(BRIDGE_URL + "?coin=" + coinParam + poolParam);
-                
+                stratumWs = new WebSocket(BRIDGE_URL + "?coin=BTC");
+
                 stratumWs.onopen = () => {
                     console.log("Stratum Connected");
                     elements.status.textContent = "Bridge Connected. Authenticating...";
-                    
-                    if (coinParam === 'XMR') {
-                        // Monero Stratum (JSON-RPC 2.0 Login)
-                        const addr = elements.address.value || "44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A"; 
-                        stratumWs.send(JSON.stringify({
-                            id: 1,
-                            jsonrpc: "2.0",
-                            method: "login",
-                            params: {
-                                login: addr,
-                                pass: "x",
-                                agent: "web-miner/1.0"
-                            }
-                        }));
-                    } else {
-                        // Bitcoin Stratum V1
-                        stratumWs.send(JSON.stringify({
-                            id: 1,
-                            method: "mining.subscribe",
-                            params: ["web-miner/1.0"]
-                        }));
-                    }
+                    stratumWs.send(JSON.stringify({
+                        id: 1,
+                        method: "mining.subscribe",
+                        params: ["web-miner/1.0"]
+                    }));
                 };
 
                 stratumWs.onmessage = (event) => {
                     const msg = JSON.parse(event.data);
-                    
-                    if (coinParam === 'XMR') {
-                         // Monero Login Response
-                         if (msg.id === 1 && !msg.error) {
-                             elements.status.textContent = "Authorized (XMR)! Waiting for jobs...";
-                             elements.networkStatus.textContent = "Stratum Active";
-                             resolve(true);
-                         }
-                         if (msg.method === 'job') {
-                             const jobId = msg.params.job_id;
-                             elements.networkBlock.textContent = "Job #" + jobId.substring(0,4);
-                             elements.status.textContent = "Mining Job: " + jobId;
-                             
-                             window.currentStratumJob = msg.params;
-                             window.currentStratumJob.isXMR = true;
-                             
-                             workers.forEach(w => {
-                                 w.postMessage({
-                                     cmd: 'job', job: window.currentStratumJob
-                                 });
-                             });
-                         }
-                    } else {
-                        // Bitcoin Logic
-                        if (msg.id === 1 && !msg.error) {
-                            // Subscribed. Save extranonce and Authorize.
-                            window.stratumExtranonce1 = msg.result[1];
-                            window.stratumExtranonce2Size = msg.result[2];
-                            const addr = elements.address.value || "1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6"; 
-                            stratumWs.send(JSON.stringify({
-                                id: 2,
-                                method: "mining.authorize",
-                                params: [addr, "web"]
-                            }));
-                        }
-                        
-                        if (msg.id === 2 && msg.result === true) {
-                            elements.status.textContent = "Authorized! Waiting for jobs...";
-                            elements.networkStatus.textContent = "Stratum Active";
-                            resolve(true); 
-                        }
 
-                        if (msg.method === 'mining.notify') {
-                            const params = msg.params;
-                            const jobId = params[0];
-                            elements.networkBlock.textContent = "Job #" + jobId.substring(0,4);
-                            elements.status.textContent = "Mining Job: " + jobId;
+                    if (msg.id === 1 && !msg.error) {
+                        // Subscribed. Save extranonce and Authorize.
+                        window.stratumExtranonce1 = msg.result[1];
+                        window.stratumExtranonce2Size = msg.result[2];
+                        const addr = elements.address.value || "1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6";
+                        stratumWs.send(JSON.stringify({
+                            id: 2,
+                            method: "mining.authorize",
+                            params: [addr, "web"]
+                        }));
+                    }
 
-                            // Dispatch actual network job to all running web workers
-                            window.currentStratumJob = {
-                                job_id: params[0], prevhash: params[1],
-                                coinb1: params[2], coinb2: params[3],
-                                merkle_branch: params[4], version: params[5],
-                                nbits: params[6], ntime: params[7], clean_jobs: params[8],
-                                isXMR: false
-                            };
-                            
-                            workers.forEach(w => {
-                                // Gen random en2
-                                let en2 = Math.floor(Math.random() * 0xFFFFFFFF).toString(16).padStart((window.stratumExtranonce2Size || 4) * 2, '0');
-                                w.postMessage({
-                                    cmd: 'job', job: window.currentStratumJob,
-                                    extranonce1: window.stratumExtranonce1, en2: en2
-                                });
+                    if (msg.id === 2 && msg.result === true) {
+                        elements.status.textContent = "Authorized! Waiting for jobs...";
+                        elements.networkStatus.textContent = "Stratum Active";
+                        resolve(true);
+                    }
+
+                    if (msg.method === 'mining.notify') {
+                        const params = msg.params;
+                        const jobId = params[0];
+                        elements.networkBlock.textContent = "Job #" + jobId.substring(0,4);
+                        elements.status.textContent = "Mining Job: " + jobId;
+
+                        // Dispatch actual network job to all running web workers
+                        window.currentStratumJob = {
+                            job_id: params[0], prevhash: params[1],
+                            coinb1: params[2], coinb2: params[3],
+                            merkle_branch: params[4], version: params[5],
+                            nbits: params[6], ntime: params[7], clean_jobs: params[8]
+                        };
+
+                        workers.forEach(w => {
+                            // Gen random en2
+                            let en2 = Math.floor(Math.random() * 0xFFFFFFFF).toString(16).padStart((window.stratumExtranonce2Size || 4) * 2, '0');
+                            w.postMessage({
+                                cmd: 'job', job: window.currentStratumJob,
+                                extranonce1: window.stratumExtranonce1, en2: en2
                             });
-                        }
-                        
-                        if (msg.method === 'mining.set_difficulty') {
-                             window.currentPoolDifficulty = msg.params[0];
-                             elements.networkDiff.textContent = msg.params[0] + " (Pool Diff)";
-                             workers.forEach(w => w.postMessage({ cmd: 'difficulty', difficulty: msg.params[0] }));
-                        }
+                        });
+                    }
+
+                    if (msg.method === 'mining.set_difficulty') {
+                         window.currentPoolDifficulty = msg.params[0];
+                         elements.networkDiff.textContent = msg.params[0] + " (Pool Diff)";
+                         workers.forEach(w => w.postMessage({ cmd: 'difficulty', difficulty: msg.params[0] }));
                     }
                 };
 
@@ -530,7 +445,7 @@ function runMinerApp() {
             if (!poolJob) { setTimeout(mineBatch, 500); return; }
 
             // Ensure we don't exhaust the 32-bit nonce space and duplicate work
-            if (nonce >= 0xFFFFF000 && !poolJob.isXMR) {
+            if (nonce >= 0xFFFFF000) {
                 nonce = 0;
                 en2 = Math.floor(Math.random() * 0xFFFFFFFF).toString(16).padStart(en2.length || 8, '0');
             }
@@ -540,26 +455,7 @@ function runMinerApp() {
             const job = poolJob;
             
             try {
-                if (job.isXMR) {
-                    // XMR Mock Hashing logic for browser (RandomX is too heavy for JS without Wasm)
-                    // We just do basic SHA-256 to simulate work and increase hash count
-                    let dummyBuffer = new Uint8Array(80);
-                    let batchNonce = nonce;
-                    for (let i = 0; i < batchSize; i++) {
-                        batchNonce++;
-                        let nonceHex = batchNonce.toString(16).padStart(8, '0');
-                        dummyBuffer.set(hexToBytes(nonceHex), 76);
-                        
-                        let h1 = await crypto.subtle.digest('SHA-256', dummyBuffer);
-                        let finalHash = new Uint8Array(await crypto.subtle.digest('SHA-256', h1));
-                        
-                        if (finalHash[31] === 0 && finalHash[30] === 0) {
-                            self.postMessage({ share: true, job_id: job.job_id, nonce: nonceHex, isXMR: true });
-                        }
-                        hashesDone++;
-                    }
-                    nonce = batchNonce;
-                } else {
+                {
                     // Construct Coinbase for BTC
                     const coinbaseText = job.coinb1 + en1 + en2 + job.coinb2;
                 const coinbaseBytes = hexToBytes(coinbaseText);
@@ -606,7 +502,7 @@ function runMinerApp() {
                     let targetVal = diffBig > 0n ? (maxTarget * 1000000n) / diffBig : 0n;
                     
                     if (hashVal <= targetVal) {
-                        self.postMessage({ share: true, job_id: job.job_id, en2: en2, ntime: job.ntime, nonce: nonceHex, isXMR: false });
+                        self.postMessage({ share: true, job_id: job.job_id, en2: en2, ntime: job.ntime, nonce: nonceHex });
                     }
                     hashesDone++;
                 }
@@ -638,22 +534,11 @@ function runMinerApp() {
                 if (e.data.share) {
                     if (stratumWs && stratumWs.readyState === 1) {
                         const addr = elements.address.value || "1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6";
-                        if (e.data.isXMR) {
-                            stratumWs.send(JSON.stringify({
-                                 id: 4, jsonrpc: "2.0", method: "submit", 
-                                 params: {
-                                     id: window.currentStratumJob.id || addr,
-                                     job_id: e.data.job_id,
-                                     nonce: e.data.nonce,
-                                     result: e.data.nonce.padStart(64, '0') // fake result
-                                 }
-                            }));
-                        } else {
-                            stratumWs.send(JSON.stringify({
+                        stratumWs.send(JSON.stringify({
                                  id: 4, method: "mining.submit", 
                                  params: [addr, e.data.job_id, e.data.en2, e.data.ntime, e.data.nonce]
                             }));
-                        }
+                        
                         console.log("Submitting Share...", e.data);
                         elements.status.textContent = "Share Found & Submitted! Nonce: " + e.data.nonce;
                     }
@@ -796,12 +681,6 @@ function runMinerApp() {
                   elements.address.focus();
                   return;
               }
-          } else if (coin === 'XMR') {
-              if (!/^[48][a-zA-Z0-9]{90,110}$/.test(addr)) {
-                  elements.status.textContent = "Error: Invalid Monero address format (starts with 4 or 8, ~95 chars)";
-                  elements.address.focus();
-                  return;
-              }
           }
       }
       
@@ -859,51 +738,8 @@ function runMinerApp() {
         elements.device.disabled = true;
         elements.status.style.color = "#7d3cff";
 
-        let xmrMinerInstance = null;
-        let xmrStatsInterval = null;
-
-        if (deviceMode === 'gpu' && !coin.startsWith('XMR')) runGpuLoop();
-        else {
-             if (coin.startsWith('XMR') && mode === 'solo') {
-                 elements.status.textContent = "Mining started (WebRandomX WASM)...";
-                 // Launch WebRandomX
-                 if (!window.WebRandomXMiner) {
-                     window.WebRandomX_PROXY = "wss://webminer.api.ckenedi.vip?coin=XMR-WRX"; 
-                     await new Promise((res, rej) => {
-                         const s = document.createElement('script');
-                         s.src = "/webrandomx/index.js";
-                         s.onload = res;
-                         s.onerror = rej;
-                         document.head.appendChild(s);
-                     });
-                 }
-                 const threads = parseInt(elements.threads.value, 10) || 1;
-                 const defaultXmr = "44AFFq5kSiGBoZ4NMDwYtN18obc8AemS33DBLWs3H7otXft3XjrpDtQGv7SqSsaBYBb98uNbr2VBBEt7f2wfn3RVGQBEP3A";
-                 xmrMinerInstance = new window.WebRandomXMiner(addr || defaultXmr, {
-                     threads: threads,
-                     autoThreads: false
-                 });
-                 xmrMinerInstance.start();
-                 
-                 xmrStatsInterval = setInterval(() => {
-                     const hr = xmrMinerInstance.getHashesPerSecond();
-                     totalHashes = xmrMinerInstance.getTotalHashes();
-                     
-                     const diff = (Date.now() - startTime) / 1000;
-                     const pad = (n) => n.toString().padStart(2, "0");
-                     elements.runtime.textContent = `${pad(Math.floor(diff/3600))}:${pad(Math.floor((diff%3600)/60))}:${pad(Math.floor(diff%60))}`;
-                     elements.hashrate.textContent = hr.toFixed(2) + " H/s";
-                     elements.totalHashesDisplay.textContent = totalHashes;
-                     
-                     if (hr > 0 && elements.networkDiff.textContent === "Waiting for Job") {
-                         elements.networkDiff.textContent = "WebRandomX Active";
-                     }
-                 }, 1000);
-                 
-             } else {
-                 startCpuMining();
-             }
-        }
+        if (deviceMode === 'gpu') runGpuLoop();
+        else startCpuMining();
       } catch (e) {
         console.error(e);
         elements.status.textContent = "Mining failed: " + e.message;
@@ -918,13 +754,6 @@ function runMinerApp() {
       // Stop Workers
       workers.forEach(w => w.terminate());
       workers = [];
-
-      // Stop WebRandomX if running
-      if (typeof xmrMinerInstance !== 'undefined' && xmrMinerInstance) {
-          xmrMinerInstance.stop();
-          xmrMinerInstance = null;
-          if (typeof xmrStatsInterval !== 'undefined') clearInterval(xmrStatsInterval);
-      }
 
       elements.startBtn.disabled = false;
       elements.stopBtn.disabled = true;
