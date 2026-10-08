@@ -42,6 +42,11 @@ function runMinerApp() {
   const BRIDGE_URL = "wss://stratum.tensors.vip";
     let stratumWs = null;
     let suggestedDifficulty = false;
+    // Highest share difficulty the pool has advertised this session. ckpool
+    // solo reports a low "search" difficulty after mining.suggest_difficulty but
+    // still rejects anything below its own minimum ("Above target"), so this
+    // running maximum is the bar a found hash must clear to be worth submitting.
+    let poolSubmitFloor = 0;
 
     // Clear loading message and inject UI
     container.innerHTML = '';
@@ -157,9 +162,9 @@ function runMinerApp() {
           <p>
               Every mode submits <strong>real</strong> Bitcoin (SHA-256) work to a real pool through the <strong>Stratum Bridge</strong> at wss://stratum.tensors.vip.
               <br><br>
-              <strong>Solo &mdash; default:</strong> your wallet address is the payout address &mdash; if one of your shares solves a block, the full block reward is paid to you. The miner asks the pool for the lowest <em>share</em> difficulty (1) so a browser can still find shares.
+              <strong>Solo &mdash; default:</strong> your wallet address is the payout address &mdash; if a share you submit solves a block, the full block reward is paid to you. Be aware that <strong>solo.ckpool.org enforces a minimum share difficulty of 10,000</strong>: a browser cannot realistically reach that, so this page normally just tracks your best local share and submits nothing. A browser finding a full block is effectively impossible (roughly one chance in hundreds of millions of years of nonstop mining) &mdash; treat this as an honest lottery, not a reliable miner.
               <br><br>
-              <strong>Two different difficulties:</strong> the <em>Network Difficulty</em> panel shows the real, live Bitcoin difficulty, read straight from each job's block header. A block is valid only when a hash meets that (enormous) target &mdash; and it is the <strong>pool</strong> (ckpool) that detects it and broadcasts the block. This page only ever submits shares over Stratum and never broadcasts anything. The <em>Share Difficulty</em> (1) is just the much lower bar at which the pool <em>credits</em> a share; lowering it changes nothing about block validity, so a browser can never make the network reject a block.
+              <strong>Three numbers, not one:</strong> the <em>Network Difficulty</em> panel is the real, live Bitcoin difficulty, read straight from each job's header &mdash; a block needs a hash at or below that target, and only the <strong>pool</strong> (ckpool) detects and broadcasts it (this page never broadcasts anything). <em>Share Difficulty</em> shown as &ldquo;&hellip; min&rdquo; is the lowest difficulty the pool will <em>credit</em>; anything easier is rejected as &ldquo;Above target&rdquo;, so the miner simply does not send it. <em>Best Share</em> is the rarest hash you have found so far, even when it is still below the pool's minimum.
               <br><br>
               <strong>Shared Pool (btcpowlab):</strong> your work joins the open btcpowlab hybrid pool. No account is required &mdash; your wallet address is credited automatically. Eligible earnings use a hybrid allocation (85% to the block finder, 10% to other recent miners, 5% to operation).
               <br><br>
@@ -563,6 +568,7 @@ function runMinerApp() {
 
             // Fresh connection -> forget the previous session's job/difficulty.
             suggestedDifficulty = false;
+            poolSubmitFloor = 0;
             window.currentStratumJob = null;
             window.currentPoolDifficulty = null;
 
@@ -632,10 +638,12 @@ function runMinerApp() {
                         elements.networkStatus.style.color = "#3ddc84";
                         logLine('Authorized as "' + getSubmitUser() + '" - mining to ' + getPoolLabel() + '.', 'ok');
                         startKeepalive();
-                        // Ask the pool for the lowest difficulty it will grant so a
-                        // browser (a few MH/s at best) can still find shares. Solo
-                        // (ckpool) honours this and drops to difficulty 1; btcpowlab
-                        // ignores it and stays at its fixed difficulty.
+                        // Ask for a low search difficulty so a browser (a few MH/s
+                        // at best) still finds "best share" candidates to display.
+                        // NOTE: this only lowers the difficulty the pool *reports*
+                        // for searching; ckpool solo still enforces its own (much
+                        // higher) minimum on submission, so offerShare() only ever
+                        // submits shares that clear poolSubmitFloor.
                         if (!suggestedDifficulty) {
                             suggestedDifficulty = true;
                             try {
@@ -704,11 +712,20 @@ function runMinerApp() {
                     }
 
                     if (msg.method === 'mining.set_difficulty') {
-                         logLine('Pool set share difficulty to ' + msg.params[0] + '.', 'info');
-                         window.currentPoolDifficulty = msg.params[0];
-                         elements.shareDiff.textContent = msg.params[0] + ' (pool)';
-                         elements.shareDiff.title = 'Share difficulty: the pool credits a share when a hash meets this target. It is far below the network difficulty and does not by itself solve a block.';
-                         broadcastToWorkers({ cmd: 'difficulty', difficulty: msg.params[0] });
+                         const d = msg.params[0];
+                         // Search difficulty (the bar a found hash must beat) vs. the
+                         // pool's enforced minimum. ckpool solo advertises a low
+                         // search difficulty after mining.suggest_difficulty but
+                         // still rejects anything below its own minimum as "Above
+                         // target", so the highest value it ever advertises is the
+                         // bar a share must clear before it is worth submitting.
+                         window.currentPoolDifficulty = d;
+                         if (d > poolSubmitFloor) poolSubmitFloor = d;
+                         logLine('Pool set share difficulty to ' + d + '.' +
+                             (poolSubmitFloor > d ? ' Minimum accepted is ' + poolSubmitFloor + '.' : ''), 'info');
+                         elements.shareDiff.textContent = formatDifficulty(poolSubmitFloor) + ' min';
+                         elements.shareDiff.title = 'Minimum share difficulty the pool will accept. A found hash must reach this target; the pool rejects anything lower as "Above target", so the miner does not send it.';
+                         broadcastToWorkers({ cmd: 'difficulty', difficulty: d });
                          if (gpu) prepareGpuContext();
                     }
                 };
@@ -804,7 +821,7 @@ function runMinerApp() {
         const w = new Worker('miner-worker.js');
         w.onmessage = (e) => {
             if (e.data.hashes) totalHashes += e.data.hashes;
-            if (e.data.share) submitShare(e.data.job_id, e.data.en2, e.data.ntime, e.data.nonce, e.data.difficulty);
+            if (e.data.share) offerShare(e.data.job_id, e.data.en2, e.data.ntime, e.data.nonce, e.data.difficulty);
         };
         w.onerror = (err) => { console.error('Mining worker error', err); };
         return w;
@@ -815,6 +832,34 @@ function runMinerApp() {
         let s = '';
         for (let i = 0; i < bytes * 2; i++) s += Math.floor(Math.random() * 16).toString(16);
         return s;
+    }
+
+    // Update the "best share" tile when a rarer hash is found (submitted or not).
+    function updateBestShare(shareDiff) {
+        if (!(typeof shareDiff === 'number' && isFinite(shareDiff)) || shareDiff <= bestShareDiff) return false;
+        bestShareDiff = shareDiff;
+        const netDiff = currentBits ? SHA256Crypto.nbitsToDifficulty(currentBits) : 0;
+        elements.bestShare.textContent = formatDifficulty(shareDiff);
+        elements.bestShare.title = 'Rarest hash found so far, as a difficulty. Solving a block needs ' +
+            formatDifficulty(netDiff) + '; this best share is ' +
+            (netDiff > 0 ? (shareDiff / netDiff).toExponential(3) : '0') + ' of the way there.';
+        return true;
+    }
+
+    // A hash met the search target. Submit it only if it also clears the pool's
+    // minimum share difficulty; the pool rejects anything lower as "Above target"
+    // (which is what produced a wall of rejections when we gated too low), so below
+    // that bar we just track it as our best local share and send nothing.
+    function offerShare(jobId, en2, ntime, nonceHex, shareDiff) {
+        if (poolSubmitFloor > 0 && typeof shareDiff === 'number' && isFinite(shareDiff) && shareDiff < poolSubmitFloor) {
+            if (updateBestShare(shareDiff)) {
+                logLine('Best local share so far: difficulty ' + formatDifficulty(shareDiff) + ' (nonce ' + nonceHex +
+                    ') - below ' + getPoolLabel() + "'s " + formatDifficulty(poolSubmitFloor) +
+                    ' minimum, so not submitted to the pool.', 'pool');
+            }
+            return;
+        }
+        submitShare(jobId, en2, ntime, nonceHex, shareDiff);
     }
 
     // Submit a share found by any engine (already verified on the obvious path).
@@ -833,14 +878,7 @@ function runMinerApp() {
             params: [getSubmitUser(), jobId, en2, ntime, nonceHex]
         }));
         sharesFound++;
-        if (typeof shareDiff === 'number' && isFinite(shareDiff) && shareDiff > bestShareDiff) {
-            bestShareDiff = shareDiff;
-            const netDiff = currentBits ? SHA256Crypto.nbitsToDifficulty(currentBits) : 0;
-            elements.bestShare.textContent = formatDifficulty(shareDiff);
-            elements.bestShare.title = 'Rarest hash found so far, as a difficulty. Solving a block needs ' +
-                formatDifficulty(netDiff) + '; this best share is ' +
-                (netDiff > 0 ? (shareDiff / netDiff).toExponential(3) : '0') + ' of the way there.';
-        }
+        updateBestShare(shareDiff);
         elements.status.textContent = 'Share found & submitted to ' + pool + ' (total ' + sharesFound + ')';
         logLine('Share found: nonce ' + nonceHex + ' at difficulty ' + formatDifficulty(shareDiff || 0) +
             ' -> submitted to ' + pool + ' (total ' + sharesFound + ')', 'pool');
@@ -975,7 +1013,7 @@ function runMinerApp() {
                 // Re-verify on the CPU path before submitting.
                 if (SHA256Crypto.nonceIsValid(gpu.ctx, nonce)) {
                     const shareDiff = SHA256Crypto.hashDifficulty(SHA256Crypto.hashNonce(gpu.ctx, nonce));
-                    submitShare(window.currentStratumJob.job_id, gpu.en2, window.currentStratumJob.ntime,
+                    offerShare(window.currentStratumJob.job_id, gpu.en2, window.currentStratumJob.ntime,
                         (nonce >>> 0).toString(16).padStart(8, '0'), shareDiff);
                 }
             }
