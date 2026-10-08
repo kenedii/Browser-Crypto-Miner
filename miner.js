@@ -132,6 +132,14 @@ function runMinerApp() {
 
         <div class="status-log" id="status" style="margin-top: 16px; font-size: 12px; font-family: monospace; color: rgba(255, 255, 255, 0.6); text-align: center; min-height: 1.5em;">Ready to initialize</div>
 
+        <div class="miner-console" style="margin-top: 16px; background: rgba(0, 0, 0, 0.45); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 10px; padding: 10px 12px; text-align: left;">
+          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
+            <span style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7;">Console</span>
+            <button id="console-clear" type="button" style="background: transparent; border: 1px solid rgba(255, 255, 255, 0.2); color: rgba(255, 255, 255, 0.7); border-radius: 6px; font-size: 11px; padding: 2px 8px; cursor: pointer;">Clear</button>
+          </div>
+          <div id="console-log" aria-live="polite" style="height: 180px; overflow-y: auto; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;"></div>
+        </div>
+
         <div class="btn-row" style="display: flex; gap: 12px; margin-top: 32px;">
           <button id="start-btn" style="flex: 1; padding: 14px; border: none; border-radius: 999px; font-weight: 600; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: transform 0.2s, opacity 0.2s; background: #7d3cff; color: white;">Start Mining</button>
           <button id="stop-btn" style="flex: 1; padding: 14px; border: none; border-radius: 999px; font-weight: 600; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: transform 0.2s, opacity 0.2s; background: rgba(255, 255, 255, 0.1); color: white;" disabled>Stop</button>
@@ -154,6 +162,10 @@ function runMinerApp() {
               <br><br>
               <em>Decentralization Note:</em> While this approach democratizes computation by distributing real network Proof-of-Work (SHA-256 for BTC) across many disparate browser instances, it has a limitation: the underlying submitted work routes through one centralized proxy (the bridge). This limits the "true" autonomy compared to running a full node locally, but successfully expands the overall hash pool to browsers.
           </p>
+        </div>
+
+        <div class="miner-footer" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1); text-align: center; font-size: 12px; opacity: 0.8;">
+          <a href="https://github.com/kenedii/Browser-Crypto-Miner" target="_blank" rel="noopener" style="color: #b892ff; text-decoration: none;">View source on GitHub &#8599;</a>
         </div>
       </div>
     `;
@@ -187,7 +199,62 @@ function runMinerApp() {
       poolPassword: document.getElementById("pool-password"),
       addressHint: document.getElementById("address-hint"),
       poolDashboard: document.getElementById("pool-dashboard"),
+      consoleLog: document.getElementById("console-log"),
+      consoleClear: document.getElementById("console-clear"),
     };
+
+    // ---- On-page console --------------------------------------------------
+    // A bounded, timestamped log that mirrors exactly what we also print to the
+    // browser's own devtools console, so the user can follow what the miner is
+    // doing (and where shares go) without opening devtools.
+    const MAX_LOG_LINES = 200;
+    const LOG_COLORS = {
+        info: 'rgba(255, 255, 255, 0.82)',
+        ok: '#4caf50',
+        warn: '#ffb300',
+        error: '#ff5252',
+        pool: '#b892ff'
+    };
+    function logLine(message, level) {
+        try { console.log('[miner] ' + message); } catch (e) {}
+        if (!elements.consoleLog) return;
+        const row = document.createElement('div');
+        row.textContent = '[' + new Date().toLocaleTimeString() + '] ' + message;
+        row.style.color = LOG_COLORS[level] || LOG_COLORS.info;
+        elements.consoleLog.appendChild(row);
+        while (elements.consoleLog.childElementCount > MAX_LOG_LINES) {
+            elements.consoleLog.removeChild(elements.consoleLog.firstChild);
+        }
+        elements.consoleLog.scrollTop = elements.consoleLog.scrollHeight;
+    }
+
+    if (elements.consoleClear) {
+        elements.consoleClear.addEventListener('click', () => {
+            if (elements.consoleLog) elements.consoleLog.innerHTML = '';
+            logLine('Console cleared.', 'info');
+        });
+    }
+
+    // Human-readable pool the bridge is currently mining to. Solo and PPLNS run
+    // through the public bridge, which dials these hosts; Custom uses the fields.
+    const SOLO_POOL_LABEL = 'solo.ckpool.org';
+    const PPLNS_POOL_LABEL = 'stratum.btcpowlab-pool.com';
+    function getPoolLabel() {
+        const mode = elements.mode.value;
+        if (mode === 'custom') {
+            const host = (elements.poolHost.value || '').trim();
+            const port = (elements.poolPort.value || '').trim();
+            if (!host) return 'custom pool';
+            return port ? host + ':' + port : host;
+        }
+        return mode === 'pplns' ? PPLNS_POOL_LABEL : SOLO_POOL_LABEL;
+    }
+
+    // Outstanding share submissions, keyed by Stratum request id, so the pool's
+    // accept/reject reply can be matched back to the exact share that was sent.
+    let lastLoggedJob = null;
+    let shareSeq = 0;
+    const pendingShares = new Map();
 
     // UI Event Listeners
     elements.coin.addEventListener('change', () => {
@@ -411,6 +478,7 @@ function runMinerApp() {
         } catch (e) {
             console.error("Network sync failed", e);
             elements.status.textContent = "Network Sync Failed" + e.message;
+            logLine('Network sync failed: ' + e.message, 'error');
             elements.networkBlock.textContent = "Offline";
             return false;
         }
@@ -450,6 +518,7 @@ function runMinerApp() {
     function connectToStratum() {
         return new Promise((resolve, reject) => {
             elements.status.textContent = "Connecting to Stratum Bridge...";
+            logLine('Opening Stratum bridge ' + BRIDGE_URL + ' (mode: ' + elements.mode.value + ').', 'info');
 
             // Fresh connection -> forget the previous session's job/difficulty.
             suggestedDifficulty = false;
@@ -468,6 +537,7 @@ function runMinerApp() {
                 stratumWs.onopen = () => {
                     console.log("Stratum Connected");
                     elements.status.textContent = "Bridge Connected. Authenticating...";
+                    logLine('Bridge connected. Subscribing...', 'info');
                     stratumWs.send(JSON.stringify({
                         id: 1,
                         method: "mining.subscribe",
@@ -478,10 +548,26 @@ function runMinerApp() {
                 stratumWs.onmessage = (event) => {
                     const msg = JSON.parse(event.data);
 
+                    // Reply to one of our mining.submit calls: the pool's verdict
+                    // on a share we sent (accepted, or rejected/stale).
+                    if (msg.id !== undefined && pendingShares.has(msg.id)) {
+                        const info = pendingShares.get(msg.id);
+                        pendingShares.delete(msg.id);
+                        if (msg.result === true) {
+                            logLine('Share ACCEPTED by ' + info.pool + ' (nonce ' + info.nonceHex +
+                                ', ' + Math.max(0, Date.now() - info.at) + ' ms)', 'ok');
+                        } else {
+                            const reason = (msg.error && msg.error[1]) ? msg.error[1]
+                                : (msg.error ? JSON.stringify(msg.error) : 'rejected');
+                            logLine('Share REJECTED by ' + info.pool + ' (nonce ' + info.nonceHex + '): ' + reason, 'error');
+                        }
+                    }
+
                     if (msg.id === 1 && !msg.error) {
                         // Subscribed. Save extranonce and Authorize.
                         window.stratumExtranonce1 = msg.result[1];
                         window.stratumExtranonce2Size = msg.result[2];
+                        logLine('Subscribed to the bridge (extranonce1 ' + msg.result[1] + ').', 'info');
                         stratumWs.send(JSON.stringify({
                             id: 2,
                             method: "mining.authorize",
@@ -493,6 +579,7 @@ function runMinerApp() {
                         clearTimeout(connectTimeout);
                         elements.status.textContent = "Authorized! Waiting for jobs...";
                         elements.networkStatus.textContent = "Stratum Active";
+                        logLine('Authorized as "' + getSubmitUser() + '" - mining to ' + getPoolLabel() + '.', 'ok');
                         // Ask the pool for the lowest difficulty it will grant so a
                         // browser (a few MH/s at best) can still find shares. Solo
                         // (ckpool) honours this and drops to difficulty 1; btcpowlab
@@ -539,6 +626,13 @@ function runMinerApp() {
                                 params[6] + '). Solving a block needs a hash at or below the matching target; the pool broadcasts it, not this page.';
                         } catch (e) {}
 
+                        if (jobId !== lastLoggedJob) {
+                            lastLoggedJob = jobId;
+                            logLine('New job #' + jobId.substring(0, 8) + ' - live network difficulty ' +
+                                formatDifficulty(currentBits ? SHA256Crypto.nbitsToDifficulty(currentBits) : 0) +
+                                ' - mining to ' + getPoolLabel() + '.', 'pool');
+                        }
+
                         // CPU: hand every worker a fresh random extranonce2.
                         workers.forEach(w => {
                             w.postMessage({
@@ -558,6 +652,7 @@ function runMinerApp() {
                     }
 
                     if (msg.method === 'mining.set_difficulty') {
+                         logLine('Pool set share difficulty to ' + msg.params[0] + '.', 'info');
                          window.currentPoolDifficulty = msg.params[0];
                          elements.shareDiff.textContent = msg.params[0] + ' (pool)';
                          elements.shareDiff.title = 'Share difficulty: the pool credits a share when a hash meets this target. It is far below the network difficulty and does not by itself solve a block.';
@@ -569,11 +664,13 @@ function runMinerApp() {
                 stratumWs.onerror = (e) => {
                     clearTimeout(connectTimeout);
                     console.error("Stratum WS Error", e);
+                    logLine('Bridge WebSocket error.', 'error');
                     reject(e);
                 };
 
                 stratumWs.onclose = () => {
                     console.log("Stratum Closed");
+                    logLine('Bridge connection closed.', 'warn');
                     isMining = false;
                 };
 
@@ -651,10 +748,18 @@ function runMinerApp() {
     }
 
     // Submit a share found by any engine (already verified on the obvious path).
+    // Each submission gets a unique Stratum id so the pool's reply can be matched
+    // back to the exact share; the on-message handler then logs accept / reject.
     function submitShare(jobId, en2, ntime, nonceHex, shareDiff) {
-        if (!stratumWs || stratumWs.readyState !== 1) return;
+        if (!stratumWs || stratumWs.readyState !== 1) {
+            logLine('Found a share but the bridge is not connected - dropping it.', 'warn');
+            return;
+        }
+        const pool = getPoolLabel();
+        const id = 1000 + (++shareSeq);
+        pendingShares.set(id, { pool: pool, nonceHex: nonceHex, at: Date.now() });
         stratumWs.send(JSON.stringify({
-            id: 4, method: 'mining.submit',
+            id: id, method: 'mining.submit',
             params: [getSubmitUser(), jobId, en2, ntime, nonceHex]
         }));
         sharesFound++;
@@ -666,7 +771,9 @@ function runMinerApp() {
                 formatDifficulty(netDiff) + '; this best share is ' +
                 (netDiff > 0 ? (shareDiff / netDiff).toExponential(3) : '0') + ' of the way there.';
         }
-        elements.status.textContent = 'Share found & submitted! nonce ' + nonceHex + ' (total ' + sharesFound + ')';
+        elements.status.textContent = 'Share found & submitted to ' + pool + ' (total ' + sharesFound + ')';
+        logLine('Share found: nonce ' + nonceHex + ' at difficulty ' + formatDifficulty(shareDiff || 0) +
+            ' -> submitted to ' + pool + ' (total ' + sharesFound + ')', 'pool');
     }
 
     function broadcastToWorkers(msg) {
@@ -837,6 +944,7 @@ function runMinerApp() {
       if (mode === 'solo' || mode === 'pplns') {
           if (!addr) {
             elements.status.textContent = "Error: BTC wallet address required for " + (mode === 'solo' ? "Solo" : "the shared pool") + " mining";
+            logLine('Enter a BTC wallet address to start ' + (mode === 'solo' ? 'Solo' : 'shared-pool') + ' mining.', 'error');
             elements.address.focus();
             return;
           }
@@ -844,6 +952,7 @@ function runMinerApp() {
           if (coin === 'BTC') {
               if (!/^(1|3|bc1)[a-zA-Z0-9]{25,59}$/.test(addr)) {
                   elements.status.textContent = "Error: Invalid Bitcoin address format";
+                  logLine('Invalid Bitcoin address format.', 'error');
                   elements.address.focus();
                   return;
               }
@@ -854,6 +963,7 @@ function runMinerApp() {
           const poolWorkerVal = elements.poolWorker.value.trim();
           if (!poolHostVal || !Number.isInteger(poolPortVal) || !poolWorkerVal) {
               elements.status.textContent = "Error: Custom Pool requires host, port and a worker/username";
+              logLine('Custom Pool requires a host, port and worker/username.', 'error');
               elements.poolHost.focus();
               return;
           }
@@ -892,6 +1002,8 @@ function runMinerApp() {
         totalHashes = 0;
         sharesFound = 0;
         bestShareDiff = 0;
+        lastLoggedJob = null;
+        pendingShares.clear();
         elements.bestShare.textContent = '0';
         elements.bestShare.title = '';
         elements.startBtn.disabled = true;
@@ -904,9 +1016,11 @@ function runMinerApp() {
         if (deviceMode === 'cpu' || deviceMode === 'hybrid') startCpuMining();
         if (deviceMode === 'gpu' || deviceMode === 'hybrid') await startGpuMining();
         elements.status.textContent = "Mining started (" + deviceMode.toUpperCase() + ")...";
+        logLine('Mining started - engine: ' + deviceMode.toUpperCase() + '.', 'ok');
       } catch (e) {
         console.error(e);
         elements.status.textContent = "Mining failed: " + e.message;
+        logLine('Mining failed: ' + e.message, 'error');
         isMining = false;
         cancelAnimationFrame(animationFrameId);
         workers.forEach(w => w.terminate());
@@ -932,10 +1046,12 @@ function runMinerApp() {
       elements.stopBtn.disabled = true;
       elements.address.disabled = (elements.mode.value === 'custom');
       elements.device.disabled = false;
+      logLine('Mining stopped by user.', 'info');
       elements.status.textContent = "Mining stopped";
       elements.status.style.color = "inherit";
     });
 
+    logLine('Miner ready. Enter your BTC address and press Start Mining.', 'info');
     initDevices();
 }
 
