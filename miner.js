@@ -12,6 +12,7 @@ function runMinerApp() {
     let startTime = 0;
     let animationFrameId;
     let totalHashes = 0;
+    let sharesFound = 0;
     
     // Network State
     let currentBlockHeight = 0;
@@ -21,18 +22,18 @@ function runMinerApp() {
 
     // Web Workers for CPU
     let workers = [];
-    let workerCodeBlob = null;
     
     // GPU State
     let adapter = null;
     let device = null;
     let pipeline = null;
     let bindGroup = null;
-    let resultBuffer = null;
+    const GPU_MAX_FOUND = 64;
 
   // Bridge config - public WebSocket stratum bridge
   const BRIDGE_URL = "wss://stratum.tensors.vip";
     let stratumWs = null;
+    let suggestedDifficulty = false;
 
     // Clear loading message and inject UI
     container.innerHTML = '';
@@ -50,8 +51,8 @@ function runMinerApp() {
         <div class="form-group" style="margin-bottom: 20px;">
           <label for="mode" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Mining Mode</label>
           <select id="mode" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-            <option value="pplns" selected>Shared Pool (btcpowlab) - PPLNS / hybrid, no account needed</option>
-            <option value="solo">Solo - mine and keep the full block reward</option>
+            <option value="solo" selected>Solo - mine and keep the full block reward (default)</option>
+            <option value="pplns">Shared Pool (btcpowlab) - PPLNS / hybrid, no account needed</option>
             <option value="custom">Custom Pool - mine for your own pool</option>
           </select>
         </div>
@@ -89,8 +90,8 @@ function runMinerApp() {
         </div>
 
         <div class="form-group" id="gpu-intensity-group" style="margin-bottom: 20px; display: none;">
-            <label for="intensity" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Compute Intensity (Workgroup Size: <span id="intensity-val">65535</span>)</label>
-            <input type="range" id="intensity" min="1000" max="65535" value="65535" step="100" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px;">
+            <label for="intensity" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">GPU Intensity (nonces per frame: <span id="intensity-val">131072</span>)</label>
+            <input type="range" id="intensity" min="64" max="65535" value="2048" step="64" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px;">
         </div>
 
         <div class="stats" style="margin-top: 24px; padding-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.1); display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
@@ -132,11 +133,13 @@ function runMinerApp() {
           <p>
               Every mode submits <strong>real</strong> Bitcoin (SHA-256) work to a real pool through the <strong>Stratum Bridge</strong> at wss://stratum.tensors.vip.
               <br><br>
-              <strong>Shared Pool (btcpowlab) &mdash; default:</strong> your work joins the btcpowlab hybrid pool. No account is required &mdash; your wallet address is credited automatically. Eligible earnings use a hybrid allocation (85% to the block finder, 10% to other recent miners, 5% to operation). Browser mining is extremely limited and no block or reward is guaranteed.
+              <strong>Solo &mdash; default:</strong> your wallet address is the payout address &mdash; if one of your shares solves a block, the full block reward is paid to you. The miner asks the pool for difficulty 1 so a browser can still find shares.
               <br><br>
-              <strong>Solo:</strong> your wallet address is the payout address &mdash; if one of your shares solves a block, the full block reward is paid to you.
+              <strong>Shared Pool (btcpowlab):</strong> your work joins the open btcpowlab hybrid pool. No account is required &mdash; your wallet address is credited automatically. Eligible earnings use a hybrid allocation (85% to the block finder, 10% to other recent miners, 5% to operation).
               <br><br>
               <strong>Custom Pool:</strong> enter your own pool's host, port and worker login &mdash; your hashes are credited to that pool/account.
+              <br><br>
+              <strong>Engines:</strong> CPU runs the double-SHA256 search across Web Workers; GPU runs an efficient WebGPU (WGSL) SHA-256d kernel that scans millions of nonces per frame; CPU + GPU runs both at once. Browser mining is extremely limited and no block or reward is guaranteed.
               <br><br>
               <em>Decentralization Note:</em> While this approach democratizes computation by distributing real network Proof-of-Work (SHA-256 for BTC) across many disparate browser instances, it has a limitation: the underlying submitted work routes through one centralized proxy (the bridge). This limits the "true" autonomy compared to running a full node locally, but successfully expands the overall hash pool to browsers.
           </p>
@@ -220,49 +223,118 @@ function runMinerApp() {
     applyModeUI();
 
     elements.intensity.addEventListener('input', (e) => {
-        elements.intensityVal.textContent = e.target.value;
+        // Each workgroup scans 64 nonces; show the per-frame nonce count.
+        elements.intensityVal.textContent = (parseInt(e.target.value, 10) * 64).toLocaleString();
     });
 
     elements.device.addEventListener('change', (e) => {
-        if (e.target.value === 'cpu') {
-            elements.cpuGroup.style.display = 'block';
-            elements.gpuGroup.style.display = 'none';
-        } else {
-            elements.cpuGroup.style.display = 'none';
-            elements.gpuGroup.style.display = 'block';
-        }
+        const v = e.target.value;
+        elements.cpuGroup.style.display = (v === 'cpu' || v === 'hybrid') ? 'block' : 'none';
+        elements.gpuGroup.style.display = (v === 'gpu' || v === 'hybrid') ? 'block' : 'none';
     });
 
     // State variables defined at top of function
 
-    // Simplified SHA256 simulation in WGSL
+    // Efficient WebGPU double-SHA256d nonce scanner (WGSL).
+    //
+    // The first 64 bytes of the 80-byte header are constant for a job, so the CPU
+    // precomputes the SHA-256 midstate after that block and each GPU thread only
+    // hashes the second header block (which carries the nonce) plus the second
+    // SHA-256 application. Threads whose result meets the share target are
+    // appended to `found` via an atomic counter.
     const SHADER_CODE = `
-      @group(0) @binding(0) var<storage, read_write> result: atomic<u32>;
-      @group(0) @binding(1) var<uniform> params: vec2<u32>; // [seed, difficulty]
+      struct Params {
+        mid  : array<vec4<u32>, 2>,   // SHA-256 state after header block 1
+        tgt  : array<vec4<u32>, 2>,   // share target, most significant word first
+        tail : vec4<u32>,             // w0 (merkle tail), ntime, nbits, baseNonce
+      };
 
-      fn hash(x: u32) -> u32 {
-          var z = x;
-          z = (z ^ 61u) ^ (z >> 16u);
-          z = z * 9u;
-          z = z ^ (z >> 4u);
-          z = z * 668265261u;
-          z = z ^ (z >> 15u);
-          return z;
+      @group(0) @binding(0) var<uniform> P : Params;
+      @group(0) @binding(1) var<storage, read_write> counter : atomic<u32>;
+      @group(0) @binding(2) var<storage, read_write> found : array<u32>;
+
+      const K : array<u32, 64> = array<u32, 64>(
+        0x428a2f98u, 0x71374491u, 0xb5c0fbcfu, 0xe9b5dba5u, 0x3956c25bu, 0x59f111f1u, 0x923f82a4u, 0xab1c5ed5u,
+        0xd807aa98u, 0x12835b01u, 0x243185beu, 0x550c7dc3u, 0x72be5d74u, 0x80deb1feu, 0x9bdc06a7u, 0xc19bf174u,
+        0xe49b69c1u, 0xefbe4786u, 0x0fc19dc6u, 0x240ca1ccu, 0x2de92c6fu, 0x4a7484aau, 0x5cb0a9dcu, 0x76f988dau,
+        0x983e5152u, 0xa831c66du, 0xb00327c8u, 0xbf597fc7u, 0xc6e00bf3u, 0xd5a79147u, 0x06ca6351u, 0x14292967u,
+        0x27b70a85u, 0x2e1b2138u, 0x4d2c6dfcu, 0x53380d13u, 0x650a7354u, 0x766a0abbu, 0x81c2c92eu, 0x92722c85u,
+        0xa2bfe8a1u, 0xa81a664bu, 0xc24b8b70u, 0xc76c51a3u, 0xd192e819u, 0xd6990624u, 0xf40e3585u, 0x106aa070u,
+        0x19a4c116u, 0x1e376c08u, 0x2748774cu, 0x34b0bcb5u, 0x391c0cb3u, 0x4ed8aa4au, 0x5b9cca4fu, 0x682e6ff3u,
+        0x748f82eeu, 0x78a5636fu, 0x84c87814u, 0x8cc70208u, 0x90befffau, 0xa4506cebu, 0xbef9a3f7u, 0xc67178f2u
+      );
+
+      fn rotr(x : u32, n : u32) -> u32 { return (x >> n) | (x << (32u - n)); }
+
+      fn sha256(h_in : array<u32, 8>, w16 : array<u32, 16>) -> array<u32, 8> {
+        var w : array<u32, 64>;
+        for (var i = 0u; i < 16u; i = i + 1u) { w[i] = w16[i]; }
+        for (var i = 16u; i < 64u; i = i + 1u) {
+          let x = w[i - 15u];
+          let y = w[i - 2u];
+          let s0 = rotr(x, 7u) ^ rotr(x, 18u) ^ (x >> 3u);
+          let s1 = rotr(y, 17u) ^ rotr(y, 19u) ^ (y >> 10u);
+          w[i] = w[i - 16u] + s0 + w[i - 7u] + s1;
+        }
+        var a = h_in[0]; var b = h_in[1]; var c = h_in[2]; var d = h_in[3];
+        var e = h_in[4]; var f = h_in[5]; var g = h_in[6]; var hh = h_in[7];
+        for (var i = 0u; i < 64u; i = i + 1u) {
+          let S1 = rotr(e, 6u) ^ rotr(e, 11u) ^ rotr(e, 25u);
+          let ch = (e & f) ^ (~e & g);
+          let t1 = hh + S1 + ch + K[i] + w[i];
+          let S0 = rotr(a, 2u) ^ rotr(a, 13u) ^ rotr(a, 22u);
+          let maj = (a & b) ^ (a & c) ^ (b & c);
+          let t2 = S0 + maj;
+          hh = g; g = f; f = e; e = d + t1; d = c; c = b; b = a; a = t1 + t2;
+        }
+        return array<u32, 8>(h_in[0] + a, h_in[1] + b, h_in[2] + c, h_in[3] + d,
+                             h_in[4] + e, h_in[5] + f, h_in[6] + g, h_in[7] + hh);
+      }
+
+      fn bswap32(x : u32) -> u32 {
+        return ((x & 0xffu) << 24u) | ((x & 0xff00u) << 8u) | ((x >> 8u) & 0xff00u) | ((x >> 24u) & 0xffu);
       }
 
       @compute @workgroup_size(64)
-      fn main(@builtin(global_invocation_id) global_id : vec3<u32>) {
-          let index = global_id.x;
-          let seed = params.x;
-          
-          var h = hash(index + seed);
-          for (var i = 0u; i < 100u; i = i + 1u) {
-              h = hash(h + i);
-          }
+      fn main(@builtin(global_invocation_id) gid : vec3<u32>) {
+        let nonce = P.tail.w + gid.x;
 
-          if (h < 100u) {
-              atomicAdd(&result, 1u);
-          }
+        var w2 : array<u32, 16>;
+        w2[0] = P.tail.x; w2[1] = P.tail.y; w2[2] = P.tail.z; w2[3] = nonce;
+        w2[4] = 0x80000000u;
+        for (var i = 5u; i < 15u; i = i + 1u) { w2[i] = 0u; }
+        w2[15] = 640u;
+
+        let mid = array<u32, 8>(P.mid[0].x, P.mid[0].y, P.mid[0].z, P.mid[0].w,
+                                P.mid[1].x, P.mid[1].y, P.mid[1].z, P.mid[1].w);
+        let d = sha256(mid, w2);
+
+        var wb : array<u32, 16>;
+        for (var i = 0u; i < 8u; i = i + 1u) { wb[i] = d[i]; }
+        wb[8] = 0x80000000u;
+        for (var i = 9u; i < 15u; i = i + 1u) { wb[i] = 0u; }
+        wb[15] = 256u;
+
+        let iv = array<u32, 8>(0x6a09e667u, 0xbb67ae85u, 0x3c6ef372u, 0xa54ff53au,
+                               0x510e527fu, 0x9b05688cu, 0x1f83d9abu, 0x5be0cd19u);
+        let f2 = sha256(iv, wb);
+
+        // displayed hash reverses byte and word order; compare most significant first
+        let r = array<u32, 8>(bswap32(f2[7]), bswap32(f2[6]), bswap32(f2[5]), bswap32(f2[4]),
+                              bswap32(f2[3]), bswap32(f2[2]), bswap32(f2[1]), bswap32(f2[0]));
+        let tg = array<u32, 8>(P.tgt[0].x, P.tgt[0].y, P.tgt[0].z, P.tgt[0].w,
+                               P.tgt[1].x, P.tgt[1].y, P.tgt[1].z, P.tgt[1].w);
+
+        var share = true;
+        for (var i = 0u; i < 8u; i = i + 1u) {
+          if (r[i] < tg[i]) { share = true; break; }
+          if (r[i] > tg[i]) { share = false; break; }
+        }
+
+        if (share) {
+          let slot = atomicAdd(&counter, 1u);
+          if (slot < ${GPU_MAX_FOUND}u) { found[slot] = nonce; }
+        }
       }
     `;
 
@@ -352,6 +424,11 @@ function runMinerApp() {
         return new Promise((resolve, reject) => {
             elements.status.textContent = "Connecting to Stratum Bridge...";
 
+            // Fresh connection -> forget the previous session's job/difficulty.
+            suggestedDifficulty = false;
+            window.currentStratumJob = null;
+            window.currentPoolDifficulty = null;
+
             try {
                 stratumWs = new WebSocket(buildBridgeUrl());
 
@@ -389,6 +466,16 @@ function runMinerApp() {
                         clearTimeout(connectTimeout);
                         elements.status.textContent = "Authorized! Waiting for jobs...";
                         elements.networkStatus.textContent = "Stratum Active";
+                        // Ask the pool for the lowest difficulty it will grant so a
+                        // browser (a few MH/s at best) can still find shares. Solo
+                        // (ckpool) honours this and drops to difficulty 1; btcpowlab
+                        // ignores it and stays at its fixed difficulty.
+                        if (!suggestedDifficulty) {
+                            suggestedDifficulty = true;
+                            try {
+                                stratumWs.send(JSON.stringify({ id: 3, method: "mining.suggest_difficulty", params: [1] }));
+                            } catch (e) {}
+                        }
                         resolve(true);
                     }
 
@@ -400,10 +487,9 @@ function runMinerApp() {
                     if (msg.method === 'mining.notify') {
                         const params = msg.params;
                         const jobId = params[0];
-                        elements.networkBlock.textContent = "Job #" + jobId.substring(0,4);
+                        elements.networkBlock.textContent = "Job #" + jobId.substring(0, 4);
                         elements.status.textContent = "Mining Job: " + jobId;
 
-                        // Dispatch actual network job to all running web workers
                         window.currentStratumJob = {
                             job_id: params[0], prevhash: params[1],
                             coinb1: params[2], coinb2: params[3],
@@ -411,20 +497,29 @@ function runMinerApp() {
                             nbits: params[6], ntime: params[7], clean_jobs: params[8]
                         };
 
+                        // CPU: hand every worker a fresh random extranonce2.
                         workers.forEach(w => {
-                            // Gen random en2
-                            let en2 = Math.floor(Math.random() * 0xFFFFFFFF).toString(16).padStart((window.stratumExtranonce2Size || 4) * 2, '0');
                             w.postMessage({
                                 cmd: 'job', job: window.currentStratumJob,
-                                extranonce1: window.stratumExtranonce1, en2: en2
+                                extranonce1: window.stratumExtranonce1,
+                                en2: randHex((window.stratumExtranonce2Size || 4) * 2),
+                                extranonce2Size: window.stratumExtranonce2Size || 4
                             });
                         });
+
+                        // GPU: rebuild the midstate/target uniform for a fresh extranonce2.
+                        if (gpu) {
+                            gpu.en2 = randHex((window.stratumExtranonce2Size || 4) * 2);
+                            gpu.baseNonce = (Math.random() * 0xffffffff) >>> 0;
+                            prepareGpuContext();
+                        }
                     }
 
                     if (msg.method === 'mining.set_difficulty') {
                          window.currentPoolDifficulty = msg.params[0];
                          elements.networkDiff.textContent = msg.params[0] + " (Pool Diff)";
-                         workers.forEach(w => w.postMessage({ cmd: 'difficulty', difficulty: msg.params[0] }));
+                         broadcastToWorkers({ cmd: 'difficulty', difficulty: msg.params[0] });
+                         if (gpu) prepareGpuContext();
                     }
                 };
 
@@ -454,7 +549,7 @@ function runMinerApp() {
 
       const cpuOpt = document.createElement('option');
       cpuOpt.value = 'cpu';
-      cpuOpt.textContent = `CPU (JavaScript Emulation) - ${cpuCount} Threads Avail.`;
+      cpuOpt.textContent = `CPU - ${cpuCount} thread(s), JavaScript SHA-256`;
       cpuOpt.selected = true;
       elements.device.appendChild(cpuOpt);
 
@@ -478,8 +573,13 @@ function runMinerApp() {
 
             const gpuOpt = document.createElement('option');
             gpuOpt.value = 'gpu';
-            gpuOpt.textContent = `WebGPU: ${infoString}`;
+            gpuOpt.textContent = `GPU - WebGPU SHA-256d (${infoString})`;
             elements.device.appendChild(gpuOpt);
+
+            const hybridOpt = document.createElement('option');
+            hybridOpt.value = 'hybrid';
+            hybridOpt.textContent = `CPU + GPU - combined (WebGPU + ${cpuCount} threads)`;
+            elements.device.appendChild(hybridOpt);
           }
         } catch (e) {
           console.warn("WebGPU initialization failed:", e);
@@ -488,250 +588,175 @@ function runMinerApp() {
       elements.status.textContent = "Ready.";
     }
 
-    // Prepare Worker Code
-    const workerScript = `
-        // True Double-SHA256 Stratum Miner Worker
-        let poolDifficulty = 1.0;
-        let isMining = false;
-        let isSimulation = false;
-        let poolJob = null;
-        let en1 = ''; let en2 = ''; let nonce = 0;
-
-        self.onmessage = function(e) {
-            if (e.data.cmd === 'start') {
-                isMining = true; 
-                isSimulation = e.data.simulation;
-                mineBatch();
-            } else if (e.data.cmd === 'stop') {
-                isMining = false;
-            } else if (e.data.cmd === 'job') {
-                poolJob = e.data.job; en1 = e.data.extranonce1; en2 = e.data.en2; nonce = 0;
-            } else if (e.data.cmd === 'difficulty') {
-                poolDifficulty = e.data.difficulty;
-            }
+    // ---- CPU mining workers ----------------------------------------------
+    // miner-worker.js imports sha256.js and runs the optimized nonce search.
+    function makeWorker() {
+        const w = new Worker('miner-worker.js');
+        w.onmessage = (e) => {
+            if (e.data.hashes) totalHashes += e.data.hashes;
+            if (e.data.share) submitShare(e.data.job_id, e.data.en2, e.data.ntime, e.data.nonce);
         };
+        w.onerror = (err) => { console.error('Mining worker error', err); };
+        return w;
+    }
 
-        function hexToBytes(hex) {
-            if (!hex) return new Uint8Array();
-            const bytes = new Uint8Array(hex.length / 2);
-            for (let i = 0; i < hex.length; i += 2) bytes[i/2] = parseInt(hex.substr(i, 2), 16);
-            return bytes;
-        }
+    // Format `bytes` random bytes as hex (used for extranonce2).
+    function randHex(bytes) {
+        let s = '';
+        for (let i = 0; i < bytes * 2; i++) s += Math.floor(Math.random() * 16).toString(16);
+        return s;
+    }
 
-        async function mineBatch() {
-            if (!isMining) return;
-            
-            // Simulation Mode (Mock hashing to demonstrate UI & local computation)
-            if (isSimulation) {
-                const batchSize = 1000;
-                for (let i = 0; i < batchSize; i++) {
-                    let z = i ^ 0x12345;
-                }
-                self.postMessage({ hashes: batchSize });
-                setTimeout(mineBatch, 0); // Non-blocking loop
-                return;
-            }
+    // Submit a share found by any engine (already verified on the obvious path).
+    function submitShare(jobId, en2, ntime, nonceHex) {
+        if (!stratumWs || stratumWs.readyState !== 1) return;
+        stratumWs.send(JSON.stringify({
+            id: 4, method: 'mining.submit',
+            params: [getSubmitUser(), jobId, en2, ntime, nonceHex]
+        }));
+        sharesFound++;
+        elements.status.textContent = 'Share found & submitted! nonce ' + nonceHex + ' (total ' + sharesFound + ')';
+    }
 
-            if (!poolJob) { setTimeout(mineBatch, 500); return; }
-
-            // Ensure we don't exhaust the 32-bit nonce space and duplicate work
-            if (nonce >= 0xFFFFF000) {
-                nonce = 0;
-                en2 = Math.floor(Math.random() * 0xFFFFFFFF).toString(16).padStart(en2.length || 8, '0');
-            }
-
-            const batchSize = 100;
-            let hashesDone = 0;
-            const job = poolJob;
-            
-            try {
-                {
-                    // Construct Coinbase for BTC
-                    const coinbaseText = job.coinb1 + en1 + en2 + job.coinb2;
-                const coinbaseBytes = hexToBytes(coinbaseText);
-                const cbHash1 = await crypto.subtle.digest('SHA-256', coinbaseBytes);
-                const coinbaseHash = await crypto.subtle.digest('SHA-256', cbHash1);
-
-                // Merkle Root
-                let merkleRoot = new Uint8Array(coinbaseHash);
-                if (job.merkle_branch && job.merkle_branch.length > 0) {
-                    for (let i = 0; i < job.merkle_branch.length; i++) {
-                        const combined = new Uint8Array(64);
-                        combined.set(merkleRoot, 0); combined.set(hexToBytes(job.merkle_branch[i]), 32);
-                        const h1 = await crypto.subtle.digest('SHA-256', combined);
-                        merkleRoot = new Uint8Array(await crypto.subtle.digest('SHA-256', h1));
-                    }
-                }
-
-                // Header (80 bytes)
-                const header = new Uint8Array(80);
-                header.set(hexToBytes(job.version), 0);
-                header.set(hexToBytes(job.prevhash), 4);
-                header.set(merkleRoot, 36);
-                header.set(hexToBytes(job.ntime), 68);
-                header.set(hexToBytes(job.nbits), 72);
-
-                let batchNonce = nonce;
-                for (let i = 0; i < batchSize; i++) {
-                    batchNonce++;
-                    let nonceHex = batchNonce.toString(16).padStart(8, '0');
-                    header.set(hexToBytes(nonceHex), 76);
-
-                    // Double SHA256 of header
-                    let h1 = await crypto.subtle.digest('SHA-256', header);
-                    let finalHash = new Uint8Array(await crypto.subtle.digest('SHA-256', h1));
-                    
-                    // Real Stratum pool difficulty validation
-                    let hexStr = '';
-                    for (let j = 31; j >= 0; j--) {
-                        hexStr += finalHash[j].toString(16).padStart(2, '0');
-                    }
-                    let hashVal = BigInt('0x' + hexStr);
-                    let maxTarget = BigInt('0x00000000FFFF0000000000000000000000000000000000000000000000000000');
-                    let diffBig = BigInt(Math.floor(poolDifficulty * 1000000));
-                    let targetVal = diffBig > 0n ? (maxTarget * 1000000n) / diffBig : 0n;
-                    
-                    if (hashVal <= targetVal) {
-                        self.postMessage({ share: true, job_id: job.job_id, en2: en2, ntime: job.ntime, nonce: nonceHex });
-                    }
-                    hashesDone++;
-                }
-                nonce = batchNonce;
-                }
-            } catch (e) {
-                console.error(e);
-            }
-
-            self.postMessage({ hashes: hashesDone });
-            setTimeout(mineBatch, 0); // Non-blocking loop
-        };
-    `;
-    const blob = new Blob([workerScript], { type: 'application/javascript' });
-    workerCodeBlob = URL.createObjectURL(blob);
+    function broadcastToWorkers(msg) {
+        workers.forEach((w) => { try { w.postMessage(msg); } catch (e) {} });
+    }
 
     function startCpuMining() {
         // clear old workers
         workers.forEach(w => w.terminate());
         workers = [];
 
-        const threadCount = parseInt(elements.threads.value, 10) || 1;
-        const isSimulation = false; // all modes submit real pool work
-        
+        const threadCount = Math.max(1, parseInt(elements.threads.value, 10) || 1);
         for (let i = 0; i < threadCount; i++) {
-            const w = new Worker(workerCodeBlob);
-            w.onmessage = (e) => {
-                if (e.data.hashes) totalHashes += e.data.hashes;
-                if (e.data.share) {
-                    if (stratumWs && stratumWs.readyState === 1) {
-                        stratumWs.send(JSON.stringify({
-                                 id: 4, method: "mining.submit", 
-                                 params: [getSubmitUser(), e.data.job_id, e.data.en2, e.data.ntime, e.data.nonce]
-                            }));
-                        
-                        console.log("Submitting Share...", e.data);
-                        elements.status.textContent = "Share Found & Submitted! Nonce: " + e.data.nonce;
-                    }
-                }
-            };
-            w.postMessage({ cmd: 'start', simulation: isSimulation });
-            
-            // Send current job if we already have one from stratum
+            const w = makeWorker();
             if (window.currentStratumJob) {
-                 let en2 = Math.floor(Math.random()*0xFFFFFFFF).toString(16).padStart((window.stratumExtranonce2Size||4)*2, '0');
-                 w.postMessage({ cmd: 'job', job: window.currentStratumJob, extranonce1: window.stratumExtranonce1, en2: en2 });
+                w.postMessage({
+                    cmd: 'job', job: window.currentStratumJob,
+                    extranonce1: window.stratumExtranonce1,
+                    en2: randHex((window.stratumExtranonce2Size || 4) * 2),
+                    extranonce2Size: window.stratumExtranonce2Size || 4
+                });
             }
-            // Send current difficulty if we already have it
             if (window.currentPoolDifficulty) {
-                 w.postMessage({ cmd: 'difficulty', difficulty: window.currentPoolDifficulty });
+                w.postMessage({ cmd: 'difficulty', difficulty: window.currentPoolDifficulty });
             }
-            
+            w.postMessage({ cmd: 'start' });
             workers.push(w);
         }
+    }
 
-        // Animation frame just for UI updates
-        function uiLoop() {
+    // Single UI refresh loop shared by every engine.
+    function startUiLoop() {
+        if (animationFrameId) cancelAnimationFrame(animationFrameId);
+        const tick = () => {
             if (!isMining) return;
             updateStats();
-            animationFrameId = requestAnimationFrame(uiLoop);
-        }
-        uiLoop();
+            animationFrameId = requestAnimationFrame(tick);
+        };
+        tick();
     }
+
+    // ---- WebGPU SHA-256d miner -------------------------------------------
+    let gpu = null;
 
     async function setupGpuCompute() {
-      if (!adapter) throw new Error("No GPU adapter available");
-      if (device) return; // Already setup
-
-      try {
+        if (!adapter) throw new Error('No GPU adapter available');
+        if (gpu) return gpu;
         device = await adapter.requestDevice();
-      } catch (e) {
-        throw new Error("Failed to request GPU device: " + e.message);
-      }
-      
-      if (!device) throw new Error("GPU device creation returned null");
+        if (!device) throw new Error('GPU device creation returned null');
 
-      const bufferSize = 4;
-      resultBuffer = device.createBuffer({
-        size: bufferSize,
-        usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC,
-      });
+        const uniform = device.createBuffer({ size: 80, usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST });
+        const count = device.createBuffer({ size: 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC | GPUBufferUsage.COPY_DST });
+        const nonces = device.createBuffer({ size: GPU_MAX_FOUND * 4, usage: GPUBufferUsage.STORAGE | GPUBufferUsage.COPY_SRC });
+        const read = device.createBuffer({ size: 4 + GPU_MAX_FOUND * 4, usage: GPUBufferUsage.COPY_DST | GPUBufferUsage.MAP_READ });
 
-      const paramsBuffer = device.createBuffer({
-        size: 8, // 2 x u32
-        usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-      });
-      
-      device.queue.writeBuffer(paramsBuffer, 0, new Uint32Array([Date.now(), 0]));
+        const shaderModule = device.createShaderModule({ code: SHADER_CODE });
+        pipeline = device.createComputePipeline({ layout: 'auto', compute: { module: shaderModule, entryPoint: 'main' } });
+        bindGroup = device.createBindGroup({
+            layout: pipeline.getBindGroupLayout(0),
+            entries: [
+                { binding: 0, resource: { buffer: uniform } },
+                { binding: 1, resource: { buffer: count } },
+                { binding: 2, resource: { buffer: nonces } }
+            ]
+        });
 
-      const shaderModule = device.createShaderModule({
-        code: SHADER_CODE,
-      });
-
-      pipeline = device.createComputePipeline({
-        layout: "auto",
-        compute: {
-          module: shaderModule,
-          entryPoint: "main",
-        },
-      });
-
-      bindGroup = device.createBindGroup({
-        layout: pipeline.getBindGroupLayout(0),
-        entries: [
-          { binding: 0, resource: { buffer: resultBuffer } },
-          { binding: 1, resource: { buffer: paramsBuffer } },
-        ],
-      });
-
-      // Seed with network data if available
-      if (currentBlockHash) {
-           const seed = parseInt(currentBlockHash.substring(0, 8), 16);
-           device.queue.writeBuffer(paramsBuffer, 0, new Uint32Array([seed, 0]));
-      }
+        gpu = { uniform: uniform, count: count, nonces: nonces, read: read, ctx: null, en2: '00000000', baseNonce: 0, frame: 0 };
+        return gpu;
     }
 
-    function runGpuLoop() {
-      if (!isMining || !device) return;
-      
-      const workgroupCount = parseInt(elements.intensity.value, 10) || 1000;
-      
-      try {
-          const commandEncoder = device.createCommandEncoder();
-          const passEncoder = commandEncoder.beginComputePass();
-          passEncoder.setPipeline(pipeline);
-          passEncoder.setBindGroup(0, bindGroup);
-          passEncoder.dispatchWorkgroups(workgroupCount);
-          passEncoder.end();
+    // Rebuild the midstate/target uniform for the current job + extranonce2.
+    function prepareGpuContext() {
+        if (!gpu || !window.currentStratumJob) return false;
+        const ctx = SHA256Crypto.buildJobContext(
+            window.currentStratumJob, window.stratumExtranonce1 || '', gpu.en2,
+            window.currentPoolDifficulty || 1);
+        gpu.ctx = ctx;
+        device.queue.writeBuffer(gpu.uniform, 0, ctx.midstate);   // midstate -> bytes 0..31
+        device.queue.writeBuffer(gpu.uniform, 32, ctx.target);    // target   -> bytes 32..63
+        return true;
+    }
 
-          device.queue.submit([commandEncoder.finish()]);
+    async function startGpuMining() {
+        await setupGpuCompute();
+        gpu.en2 = randHex((window.stratumExtranonce2Size || 4) * 2);
+        gpu.baseNonce = (Math.random() * 0xffffffff) >>> 0;
+        prepareGpuContext();
+        if (!gpu.frame) runGpuLoop();
+    }
 
-          totalHashes += 64 * workgroupCount;
-          updateStats();
-          animationFrameId = requestAnimationFrame(runGpuLoop);
-      } catch(e) {
-          console.error("GPU Loop Error", e);
-          isMining = false;
-          elements.status.textContent = "GPU Error: " + e.message;
-      }
+    async function runGpuLoop() {
+        if (!isMining || !gpu) return;
+        try {
+            if (!gpu.ctx || !window.currentStratumJob) {
+                gpu.frame = requestAnimationFrame(runGpuLoop);
+                return;
+            }
+            const wg = Math.max(1, Math.min(65535, parseInt(elements.intensity.value, 10) || 2048));
+            const span = wg * 64;
+
+            // Roll extranonce2 (and rebuild the midstate) when the 32-bit nonce
+            // space is exhausted.
+            if (gpu.baseNonce > 0xffffffff - span) {
+                gpu.baseNonce = (Math.random() * 0xffffffff) >>> 0;
+                gpu.en2 = randHex((window.stratumExtranonce2Size || 4) * 2);
+                prepareGpuContext();
+            }
+
+            device.queue.writeBuffer(gpu.uniform, 64, new Uint32Array([gpu.ctx.w0, gpu.ctx.ntime, gpu.ctx.nbits, gpu.baseNonce >>> 0]));
+            device.queue.writeBuffer(gpu.count, 0, new Uint32Array([0]));
+
+            const enc = device.createCommandEncoder();
+            const pass = enc.beginComputePass();
+            pass.setPipeline(pipeline);
+            pass.setBindGroup(0, bindGroup);
+            pass.dispatchWorkgroups(wg);
+            pass.end();
+            enc.copyBufferToBuffer(gpu.count, 0, gpu.read, 0, 4);
+            enc.copyBufferToBuffer(gpu.nonces, 0, gpu.read, 4, GPU_MAX_FOUND * 4);
+            device.queue.submit([enc.finish()]);
+            totalHashes += span;
+
+            await gpu.read.mapAsync(GPUMapMode.READ);
+            const results = new Uint32Array(gpu.read.getMappedRange().slice(0));
+            gpu.read.unmap();
+            const n = Math.min(results[0], GPU_MAX_FOUND);
+            for (let i = 0; i < n; i++) {
+                const nonce = results[1 + i];
+                // Re-verify on the CPU path before submitting.
+                if (SHA256Crypto.nonceIsValid(gpu.ctx, nonce)) {
+                    submitShare(window.currentStratumJob.job_id, gpu.en2, window.currentStratumJob.ntime,
+                        (nonce >>> 0).toString(16).padStart(8, '0'));
+                }
+            }
+            gpu.baseNonce = (gpu.baseNonce + span) >>> 0;
+            gpu.frame = requestAnimationFrame(runGpuLoop);
+        } catch (e) {
+            console.error('GPU loop error', e);
+            elements.status.textContent = 'GPU error: ' + e.message;
+            isMining = false;
+        }
     }
     
     // Legacy single thread loop removed, replaced by Web Workers
@@ -799,56 +824,58 @@ function runMinerApp() {
            }
       }
       
+      // Make sure a GPU engine has an adapter before we commit to mining.
       const deviceMode = elements.device.value;
+      if ((deviceMode === 'gpu' || deviceMode === 'hybrid') && !adapter) {
+          if (navigator.gpu) await initDevices(); // re-detect the adapter
+          if (!adapter) {
+              elements.status.textContent = "Error: WebGPU is not available in this browser.";
+              return;
+          }
+      }
+
       try {
-        if (deviceMode === 'gpu') {
-            if (!adapter) {
-                // If the adapter variable is null but navigator.gpu exists, try to init again or fail
-                if (navigator.gpu) {
-                    await initDevices(); // Attempt re-init
-                    if (!adapter) {
-                        elements.status.textContent = "Error: GPU adapter could not be initialized.";
-                        return;
-                    }
-                } else {
-                     elements.status.textContent = "Error: WebGPU not supported in this browser.";
-                     return;
-                }
-            }
-            await setupGpuCompute();
-            elements.status.textContent = "Mining started (GPU Mode)...";
-        } else {
-            elements.status.textContent = "Mining started (CPU Mode)...";
-        }
         isMining = true;
         startTime = Date.now();
         totalHashes = 0;
+        sharesFound = 0;
         elements.startBtn.disabled = true;
         elements.stopBtn.disabled = false;
         elements.address.disabled = true;
         elements.device.disabled = true;
         elements.status.style.color = "#7d3cff";
 
-        if (deviceMode === 'gpu') runGpuLoop();
-        else startCpuMining();
+        startUiLoop();
+        if (deviceMode === 'cpu' || deviceMode === 'hybrid') startCpuMining();
+        if (deviceMode === 'gpu' || deviceMode === 'hybrid') await startGpuMining();
+        elements.status.textContent = "Mining started (" + deviceMode.toUpperCase() + ")...";
       } catch (e) {
         console.error(e);
         elements.status.textContent = "Mining failed: " + e.message;
         isMining = false;
+        cancelAnimationFrame(animationFrameId);
+        workers.forEach(w => w.terminate());
+        workers = [];
+        elements.startBtn.disabled = false;
+        elements.stopBtn.disabled = true;
       }
     });
 
     elements.stopBtn.addEventListener("click", () => {
       isMining = false;
       cancelAnimationFrame(animationFrameId);
-      
+      if (gpu && gpu.frame) { cancelAnimationFrame(gpu.frame); gpu.frame = 0; }
+
       // Stop Workers
       workers.forEach(w => w.terminate());
       workers = [];
 
+      // Drop the stratum connection so the next start reconnects cleanly.
+      if (stratumWs) { try { stratumWs.close(); } catch (e) {} stratumWs = null; }
+
       elements.startBtn.disabled = false;
       elements.stopBtn.disabled = true;
-      elements.address.disabled = false;
+      elements.address.disabled = (elements.mode.value === 'custom');
       elements.device.disabled = false;
       elements.status.textContent = "Mining stopped";
       elements.status.style.color = "inherit";
