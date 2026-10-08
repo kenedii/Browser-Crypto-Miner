@@ -43,15 +43,15 @@ function runMinerApp() {
         <div class="form-group" style="margin-bottom: 20px;">
           <label for="coin" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Crypto / Pool</label>
           <select id="coin" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-            <option value="BTC" selected>Bitcoin (Solo CKPool)</option>
+            <option value="BTC" selected>Bitcoin (BTC)</option>
           </select>
         </div>
 
         <div class="form-group" style="margin-bottom: 20px;">
           <label for="mode" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Mining Mode</label>
           <select id="mode" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-            <option value="solo" selected>Solo - mine and keep the full block reward</option>
-            <option value="pplns">Tensors.vip Pool - PPLNS (pay per last N shares)</option>
+            <option value="pplns" selected>Shared Pool (btcpowlab) - PPLNS / hybrid, no account needed</option>
+            <option value="solo">Solo - mine and keep the full block reward</option>
             <option value="custom">Custom Pool - mine for your own pool</option>
           </select>
         </div>
@@ -59,6 +59,13 @@ function runMinerApp() {
         <div class="form-group" style="margin-bottom: 20px;">
           <label for="address" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Wallet Address</label>
           <input type="text" id="address" placeholder="Enter your BTC address" value="" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
+          <div id="address-hint" style="margin-top: 8px; font-size: 12px; line-height: 1.45; opacity: 0.72; display: none;">
+            No account or username is needed for the default pool &mdash; you are logged in automatically as
+            <code style="background: rgba(0,0,0,0.35); padding: 1px 5px; border-radius: 4px;">&lt;your-address&gt;.browser</code>.
+          </div>
+          <div id="pool-dashboard" style="margin-top: 10px; display: none;">
+            <a href="https://btcpowlab-pool.com/start" target="_blank" rel="noopener" style="color: #b892ff; font-size: 13px; text-decoration: underline;">View the live pool dashboard &nearr;</a>
+          </div>
         </div>
 
         <div class="form-group" id="custom-pool-group" style="margin-bottom: 20px; display: none;">
@@ -125,9 +132,9 @@ function runMinerApp() {
           <p>
               Every mode submits <strong>real</strong> Bitcoin (SHA-256) work to a real pool through the <strong>Stratum Bridge</strong> at wss://stratum.tensors.vip.
               <br><br>
-              <strong>Solo:</strong> your wallet address is the payout address &mdash; if one of your shares solves a block, the full block reward is paid to you.
+              <strong>Shared Pool (btcpowlab) &mdash; default:</strong> your work joins the btcpowlab hybrid pool. No account is required &mdash; your wallet address is credited automatically. Eligible earnings use a hybrid allocation (85% to the block finder, 10% to other recent miners, 5% to operation). Browser mining is extremely limited and no block or reward is guaranteed.
               <br><br>
-              <strong>Tensors.vip Pool (PPLNS):</strong> your work joins a shared pool and rewards are split using PPLNS (pay per last N shares) by the pool's accounting.
+              <strong>Solo:</strong> your wallet address is the payout address &mdash; if one of your shares solves a block, the full block reward is paid to you.
               <br><br>
               <strong>Custom Pool:</strong> enter your own pool's host, port and worker login &mdash; your hashes are credited to that pool/account.
               <br><br>
@@ -162,6 +169,8 @@ function runMinerApp() {
       poolPort: document.getElementById("pool-port"),
       poolWorker: document.getElementById("pool-worker"),
       poolPassword: document.getElementById("pool-password"),
+      addressHint: document.getElementById("address-hint"),
+      poolDashboard: document.getElementById("pool-dashboard"),
     };
 
     // UI Event Listeners
@@ -172,23 +181,42 @@ function runMinerApp() {
 
     // Reflect the selected mode in the form: Solo / PPLNS use the wallet
     // address as the payout / credit address; Custom Pool uses its own login.
+    const DEFAULT_POOL_HOST = "stratum.btcpowlab-pool.com";
+
     function applyModeUI() {
         const mode = elements.mode.value;
         const isCustom = mode === 'custom';
+        const isDefaultPool = mode === 'pplns';
+
+        // The dashboard belongs to the default (btcpowlab) pool, so show it when
+        // that pool is in use - via the built-in mode or when the same host has
+        // been typed into the Custom Pool host field.
+        const customHost = (elements.poolHost.value || '').trim().toLowerCase().split(':')[0];
+        const usesDefaultPool = isDefaultPool || customHost === DEFAULT_POOL_HOST;
 
         elements.customGroup.style.display = isCustom ? 'block' : 'none';
+        // The address field stays active in every mode so the user can set the
+        // worker login; on the default pool it becomes "<address>.browser".
         elements.address.disabled = isCustom;
+
+        if (elements.addressHint) {
+            elements.addressHint.style.display = isDefaultPool ? 'block' : 'none';
+        }
+        if (elements.poolDashboard) {
+            elements.poolDashboard.style.display = usesDefaultPool ? 'block' : 'none';
+        }
 
         if (isCustom) {
             elements.address.placeholder = "(unused in Custom Pool mode)";
-        } else if (mode === 'pplns') {
-            elements.address.placeholder = "BTC address credited for your PPLNS shares";
+        } else if (isDefaultPool) {
+            elements.address.placeholder = "Enter your BTC address (credited automatically)";
         } else {
             elements.address.placeholder = "Enter your BTC address";
         }
     }
 
     elements.mode.addEventListener('change', applyModeUI);
+    elements.poolHost.addEventListener('input', applyModeUI);
     applyModeUI();
 
     elements.intensity.addEventListener('input', (e) => {
@@ -306,7 +334,13 @@ function runMinerApp() {
         if (elements.mode.value === 'custom') {
             return [elements.poolWorker.value.trim(), elements.poolPassword.value || "x"];
         }
-        return [elements.address.value.trim(), "web"];
+        const addr = elements.address.value.trim();
+        if (elements.mode.value === 'pplns') {
+            // The default shared pool (btcpowlab) expects the worker login
+            // "<btc-address>.browser" and accepts any password.
+            return [(addr ? addr + ".browser" : ""), "x"];
+        }
+        return [addr, "web"];
     }
 
     // Username echoed on share submission (must match the authorized login).
@@ -725,7 +759,7 @@ function runMinerApp() {
       // Validate the inputs required by the selected mode.
       if (mode === 'solo' || mode === 'pplns') {
           if (!addr) {
-            elements.status.textContent = "Error: BTC wallet address required for " + (mode === 'solo' ? "Solo" : "PPLNS") + " mining";
+            elements.status.textContent = "Error: BTC wallet address required for " + (mode === 'solo' ? "Solo" : "the shared pool") + " mining";
             elements.address.focus();
             return;
           }

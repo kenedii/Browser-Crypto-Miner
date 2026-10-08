@@ -6,8 +6,8 @@ Mining modes
 
 The client selects a mode with the `?mode=` query parameter:
 
-- `mode=solo` (default) - routes to the solo pool (`BTC_POOL_HOST`). The miner authorizes with its own BTC address; if one of its shares solves a block, the full block reward is theirs.
-- `mode=pplns` - routes to the Tensors.vip shared pool (`PPLNS_POOL_HOST` / `PPLNS_POOL_PORT`, default `stratum.antpool.com:3333`). Rewards are shared using PPLNS (pay per last N shares) by the pool's accounting. The default upstream is a public placeholder - point it at your own PPLNS pool backend for production.
+- `mode=solo` - routes to the solo pool (`BTC_POOL_HOST`). The miner authorizes with its own BTC address; if one of its shares solves a block, the full block reward is theirs.
+- `mode=pplns` (default) - routes to the shared pool (`PPLNS_POOL_HOST` / `PPLNS_POOL_PORT`, default `stratum.btcpowlab-pool.com:3333`). btcpowlab is an open pool: no account is required and the miner is credited as `<btc-address>.browser` (the bridge relays the login unchanged). Earnings use a hybrid allocation (85% finder / 10% recent miners / 5% operation). Override the env vars only to point at your own pool backend.
 - `mode=custom` - the client supplies `&host=` and `&port=` and the bridge dials that pool ("mine for my own pool"). Disable with `ALLOW_CUSTOM_POOLS=0`. Only ports listed in `CUSTOM_POOL_PORTS` are allowed and private/loopback hosts are rejected, so the bridge cannot be abused as an SSRF proxy.
 
 How it works
@@ -21,17 +21,21 @@ Configuration (`bridge.js` / environment overrides)
 - `PORT` - WebSocket port to listen on (default 8080)
 - `BTC_POOL_HOST` - solo pool host (default `solo.ckpool.org`)
 - `BTC_POOL_PORT` - solo pool port (default `3333`)
-- `PPLNS_POOL_HOST` - Tensors.vip PPLNS pool host (default `stratum.antpool.com`)
+- `PPLNS_POOL_HOST` - shared-pool host (default `stratum.btcpowlab-pool.com`)
 - `PPLNS_POOL_PORT` - PPLNS pool port (default `3333`)
 - `BTC_DEV_FEE_ADDRESS` - developer BTC address
 - `DISABLE_DEV_FEE=1` (or `true`) - disable the dev fee entirely (100% of mining credits the user)
 - `ALLOW_CUSTOM_POOLS=0` - disable client-supplied custom pools (enabled by default)
 - `CUSTOM_POOL_PORTS` - comma-separated allow-list of ports for custom pools
 
+The shared-pool (PPLNS) backend
+
+There is no "lightweight" way to self-host real PPLNS: PPLNS needs a pool server that builds block templates, tracks each miner's shares over a rolling window and pays out proportionally from the blocks it finds - i.e. a full node + pool software + a hot wallet + a payout pipeline. The pragmatic option is to ride an existing open pool. The default upstream (`stratum.btcpowlab-pool.com`) is exactly that: an open hybrid-solo pool that needs no account. Only set `PPLNS_POOL_HOST` / `PPLNS_POOL_PORT` if you actually operate your own pool.
+
 Examples (WebSocket URLs expected by the frontend)
 
-- Solo (default): `ws://HOST:PORT/?coin=BTC` or `...?coin=BTC&mode=solo`
-- Tensors.vip PPLNS: `...?coin=BTC&mode=pplns`
+- Solo: `...?coin=BTC&mode=solo` (bare `?coin=BTC` also routes to solo)
+- Shared pool (default): `...?coin=BTC&mode=pplns`
 - Custom pool: `...?coin=BTC&mode=custom&host=pool.example.com&port=3333`
 - Behind TLS: `wss://stratum.tensors.vip/?coin=BTC&mode=solo`
 

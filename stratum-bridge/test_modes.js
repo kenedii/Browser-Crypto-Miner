@@ -72,6 +72,10 @@ fakePool.listen(FAKE_POOL_PORT, '127.0.0.1', () => {
         (badPort.reason || '').toLowerCase().includes('port')
             ? ok('custom disallowed port rejected') : fail('custom disallowed port not rejected: ' + JSON.stringify(badPort));
 
+        const bridgeSrc = require('fs').readFileSync(require('path').join(__dirname, 'bridge.js'), 'utf8');
+        bridgeSrc.includes("'stratum.btcpowlab-pool.com'")
+            ? ok('default shared pool is btcpowlab') : fail('default shared pool is not btcpowlab');
+
         cleanup();
         process.exit(process.exitCode || 0);
     })();

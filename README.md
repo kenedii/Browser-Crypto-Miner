@@ -7,7 +7,7 @@ A browser-based Bitcoin (BTC) miner. The web UI runs a pure-JavaScript double-SH
 The miner exposes three modes, all of which submit real pool work:
 
 - **Solo** - mine with your own BTC address as the payout address. If one of your shares solves a block, the full block reward is yours. Routes through the bridge to the solo pool (default `solo.ckpool.org:3333`).
-- **Tensors.vip Pool (PPLNS)** - mine into the shared Tensors.vip pool. Rewards are distributed using PPLNS (pay per last N shares). Routes through the bridge to the configured PPLNS pool backend.
+- **Shared Pool (btcpowlab)** *(default)* - mine into the open btcpowlab pool. No account is required: your BTC address is used automatically as the worker login (`<address>.browser`). Earnings use a hybrid allocation (85% finder / 10% recent miners / 5% operation). Routes through the bridge to the configured shared-pool upstream (default `stratum.btcpowlab-pool.com:3333`).
 - **Custom Pool** - enter your own pool's host, port, worker and password; your hashes are credited to that pool/account.
 
 The mode is passed to the bridge as a query parameter (e.g. `wss://stratum.tensors.vip/?coin=BTC&mode=solo`); see `stratum-bridge/README.md` for the routing and safety details.
@@ -55,7 +55,7 @@ The Stratum Bridge connects the browser to a Bitcoin pool (default `solo.ckpool.
    const CONFIG = {
      soloPoolHost: 'solo.ckpool.org',   // solo mode upstream
      soloPoolPort: 3333,
-     pplnsPoolHost: 'stratum.antpool.com',  // Tensors.vip PPLNS mode upstream
+     pplnsPoolHost: 'stratum.btcpowlab-pool.com',  // shared-pool upstream
      pplnsPoolPort: 3333,
      btcDevFeeAddress: '1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6',
      devFeePercent: 0.25,               // set to 0 to disable the dev fee
@@ -77,4 +77,22 @@ The dev fee can also be disabled at runtime by starting the bridge with `DISABLE
 ## ☁️ Deploying
 
 - **Bridge:** runs as a small Node.js container (`stratum-bridge/Dockerfile`) behind a TLS-terminating reverse proxy (e.g. Caddy) on a VPS. See `stratum-bridge/docker-compose.yml`.
-- **Frontend:** the multi-stage `Dockerfile` minifies the assets and serves them with Nginx; deploy as a container to Google Cloud Run.
+- **Frontend:** the multi-stage `Dockerfile` minifies the assets, caches them in the browser and serves them with Nginx; deploy as a container to Google Cloud Run.
+
+---
+
+## 🏗 Architecture (Cloud Run stays cheap)
+
+All mining traffic is WebSocket and goes **directly** from the browser to the VPS stratum bridge (`wss://stratum.tensors.vip`) - it never touches Cloud Run. Cloud Run only serves two static files (`index.html` + `miner.js`) through Nginx with gzip and browser caching, and is scaled to zero between requests.
+
+- **Cloud Run (frontend):** static files only - no WebSocket, no proxying, no computation. Scale to zero (`--min-instances=0`).
+- **VPS (bridge):** every stratum connection, all share submission and the dev-fee cycle. This is the only component that grows with the number of miners.
+
+Deploy the frontend scaled to zero, e.g.:
+
+```bash
+gcloud run deploy miner \
+  --source . --region us-central1 --allow-unauthenticated \
+  --port 80 --min-instances 0 --max-instances 3 \
+  --memory 128Mi --cpu 1 --cpu-throttling
+```

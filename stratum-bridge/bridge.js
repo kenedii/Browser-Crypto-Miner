@@ -8,9 +8,11 @@ const CONFIG = {
     soloPoolHost: process.env.BTC_POOL_HOST || 'solo.ckpool.org',
     soloPoolPort: parseInt(process.env.BTC_POOL_PORT || '3333', 10),
 
-    // Tensors.vip shared pool (PPLNS - pay per last N shares). Point this at
-    // the PPLNS pool backend you operate / have an account with.
-    pplnsPoolHost: process.env.PPLNS_POOL_HOST || 'stratum.antpool.com',
+    // Shared pool (PPLNS / hybrid solo) - the default upstream for the
+    // "shared pool" mode. btcpowlab is an open pool: no account is required
+    // and the miner is credited as "<btc-address>.browser". Override with
+    // PPLNS_POOL_HOST / PPLNS_POOL_PORT to point at your own pool backend.
+    pplnsPoolHost: process.env.PPLNS_POOL_HOST || 'stratum.btcpowlab-pool.com',
     pplnsPoolPort: parseInt(process.env.PPLNS_POOL_PORT || '3333', 10),
 
     // Developer (dev-fee) Bitcoin address
