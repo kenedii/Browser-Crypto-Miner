@@ -82,7 +82,10 @@ function loop() {
             job_id: job.job_id,
             en2: en2,
             ntime: job.ntime,
-            nonce: (found >>> 0).toString(16).padStart(8, '0')
+            nonce: (found >>> 0).toString(16).padStart(8, '0'),
+            // Rarity of the found hash (diff-1 target / value). Reported so the
+            // page can show the best share against the real network difficulty.
+            difficulty: SC.hashDifficulty(words)
         });
     }
     setTimeout(loop, 0);

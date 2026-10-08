@@ -132,18 +132,66 @@
         return out;
     }
 
+    // Eight big-endian words (most-significant word first) for a 256-bit target.
+    function targetToWords(t) {
+        var hex = t.toString(16);
+        while (hex.length < 64) hex = '0' + hex;
+        var out = new Uint32Array(8);
+        for (var i = 0; i < 8; i++) out[i] = parseInt(hex.substr(i * 8, 8), 16) >>> 0;
+        return out;
+    }
+
     // Convert a (possibly fractional) pool difficulty to eight big-endian target
     // words, most-significant word first.
     function computeTargetWords(difficulty) {
         var d = difficulty || 1;
         if (d < 0) d = 1;
         var scaled = BigInt(Math.max(1, Math.round(d * 1e9)));
-        var t = (MAX_TARGET * 1000000000n) / scaled;
-        var hex = t.toString(16);
-        while (hex.length < 64) hex = '0' + hex;
-        var out = new Uint32Array(8);
-        for (var i = 0; i < 8; i++) out[i] = parseInt(hex.substr(i * 8, 8), 16) >>> 0;
-        return out;
+        return targetToWords((MAX_TARGET * 1000000000n) / scaled);
+    }
+
+    // ---- real network difficulty (from a block header's compact "nBits") -----
+
+    // Decode a compact nBits value into the full 256-bit target as a BigInt: the
+    // top byte is the length in bytes, the low 3 bytes are the mantissa, and
+    // target = mantissa * 2^(8 * (exponent - 3)).
+    function compactToTarget(bits) {
+        var b = BigInt(bits >>> 0);
+        var exponent = Number((b >> 24n) & 0xffn);
+        var mantissa = b & 0x007fffffn;
+        if (exponent <= 3) return mantissa >> BigInt(8 * (3 - exponent));
+        return mantissa << BigInt(8 * (exponent - 3));
+    }
+
+    // Real Bitcoin network difficulty encoded by a compact nBits value:
+    // network difficulty = (difficulty-1 target) / target. This is the difficulty
+    // a hash must reach to actually solve AND broadcast a block. Share difficulty
+    // (what a pool asks for) is deliberately lower and does NOT change this.
+    function nbitsToDifficulty(bits) {
+        var t = compactToTarget(bits);
+        if (t <= 0n) return 0;
+        return Number((MAX_TARGET * 1000000n) / t) / 1000000;
+    }
+
+    // Eight big-endian target words for the real network target of a nBits value.
+    function nbitsToTargetWords(bits) {
+        return targetToWords(compactToTarget(bits));
+    }
+
+    // Numeric value of the displayed block hash: the digest words reversed to
+    // big-endian display order, as one 256-bit BigInt (most-significant first).
+    function wordsToValue(words) {
+        var v = 0n;
+        for (var i = 0; i < 8; i++) v = (v << 32n) | BigInt(bswap32(words[7 - i]));
+        return v;
+    }
+
+    // Difficulty of a found hash (how rare it is) = difficulty-1 target / value.
+    // A hash that can solve a block has hashDifficulty >= the network difficulty.
+    function hashDifficulty(words) {
+        var v = wordsToValue(words);
+        if (v <= 0n) return Infinity;
+        return Number((MAX_TARGET * 1000000n) / v) / 1000000;
     }
 
     // ---- optimized per-job hashing -----------------------------------------
@@ -273,6 +321,12 @@
         putU32: putU32,
         stratumPrevhash: stratumPrevhash,
         computeTargetWords: computeTargetWords,
+        targetToWords: targetToWords,
+        compactToTarget: compactToTarget,
+        nbitsToDifficulty: nbitsToDifficulty,
+        nbitsToTargetWords: nbitsToTargetWords,
+        wordsToValue: wordsToValue,
+        hashDifficulty: hashDifficulty,
         buildJobContext: buildJobContext,
         makeScratch: makeScratch,
         hashNonce: hashNonce,

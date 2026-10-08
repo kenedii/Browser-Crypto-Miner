@@ -19,6 +19,7 @@ function runMinerApp() {
     let currentBlockHash = "";
     let difficulty = 1; // Default difficulty
     let currentBits = 0;
+    let bestShareDiff = 0; // rarest hash found so far, as a difficulty
 
     // Web Workers for CPU
     let workers = [];
@@ -109,7 +110,15 @@ function runMinerApp() {
           </div>
           <div class="stat-item" style="text-align: center;">
             <div class="stat-value" id="difficulty" style="font-size: 20px; font-weight: 700; margin-bottom: 4px; font-feature-settings: 'tnum';">...</div>
-            <div class="stat-label" style="font-size: 11px; opacity: 0.6; text-transform: uppercase;">Difficulty (Rel)</div>
+            <div class="stat-label" style="font-size: 11px; opacity: 0.6; text-transform: uppercase;">Network Difficulty</div>
+          </div>
+          <div class="stat-item" style="text-align: center;">
+            <div class="stat-value" id="share-difficulty" style="font-size: 20px; font-weight: 700; margin-bottom: 4px; font-feature-settings: 'tnum';">...</div>
+            <div class="stat-label" style="font-size: 11px; opacity: 0.6; text-transform: uppercase;">Share Difficulty</div>
+          </div>
+          <div class="stat-item" style="text-align: center;">
+            <div class="stat-value" id="best-share" style="font-size: 20px; font-weight: 700; margin-bottom: 4px; font-feature-settings: 'tnum';">0</div>
+            <div class="stat-label" style="font-size: 11px; opacity: 0.6; text-transform: uppercase;">Best Share</div>
           </div>
           <div class="stat-item" style="text-align: center;">
              <div class="stat-value" id="total-hashes" style="font-size: 20px; font-weight: 700; margin-bottom: 4px; font-feature-settings: 'tnum';">0</div>
@@ -133,7 +142,9 @@ function runMinerApp() {
           <p>
               Every mode submits <strong>real</strong> Bitcoin (SHA-256) work to a real pool through the <strong>Stratum Bridge</strong> at wss://stratum.tensors.vip.
               <br><br>
-              <strong>Solo &mdash; default:</strong> your wallet address is the payout address &mdash; if one of your shares solves a block, the full block reward is paid to you. The miner asks the pool for difficulty 1 so a browser can still find shares.
+              <strong>Solo &mdash; default:</strong> your wallet address is the payout address &mdash; if one of your shares solves a block, the full block reward is paid to you. The miner asks the pool for the lowest <em>share</em> difficulty (1) so a browser can still find shares.
+              <br><br>
+              <strong>Two different difficulties:</strong> the <em>Network Difficulty</em> panel shows the real, live Bitcoin difficulty, read straight from each job's block header. A block is valid only when a hash meets that (enormous) target &mdash; and it is the <strong>pool</strong> (ckpool) that detects it and broadcasts the block. This page only ever submits shares over Stratum and never broadcasts anything. The <em>Share Difficulty</em> (1) is just the much lower bar at which the pool <em>credits</em> a share; lowering it changes nothing about block validity, so a browser can never make the network reject a block.
               <br><br>
               <strong>Shared Pool (btcpowlab):</strong> your work joins the open btcpowlab hybrid pool. No account is required &mdash; your wallet address is credited automatically. Eligible earnings use a hybrid allocation (85% to the block finder, 10% to other recent miners, 5% to operation).
               <br><br>
@@ -159,6 +170,8 @@ function runMinerApp() {
       runtime: document.getElementById("runtime"),
       networkBlock: document.getElementById("network-block"),
       networkDiff: document.getElementById("difficulty"),
+      shareDiff: document.getElementById("share-difficulty"),
+      bestShare: document.getElementById("best-share"),
       status: document.getElementById("status"),
       intensity: document.getElementById("intensity"),
       intensityVal: document.getElementById("intensity-val"),
@@ -338,6 +351,20 @@ function runMinerApp() {
       }
     `;
 
+    // Human-readable difficulty: T/P/E for the large real network values, and
+    // plain decimals for the small share difficulties.
+    function formatDifficulty(d) {
+        if (!isFinite(d)) return 'inf';
+        if (d >= 1e18) return (d / 1e18).toFixed(2) + ' E';
+        if (d >= 1e15) return (d / 1e15).toFixed(2) + ' P';
+        if (d >= 1e12) return (d / 1e12).toFixed(2) + ' T';
+        if (d >= 1e9) return (d / 1e9).toFixed(2) + ' G';
+        if (d >= 1e6) return (d / 1e6).toFixed(2) + ' M';
+        if (d >= 1e3) return (d / 1e3).toFixed(2) + ' k';
+        if (d >= 1) return d.toFixed(2);
+        return d.toPrecision(3);
+    }
+
     async function fetchNetworkData() {
         elements.status.textContent = "Syncing with Bitcoin Mainnet...";
         try {
@@ -497,6 +524,21 @@ function runMinerApp() {
                             nbits: params[6], ntime: params[7], clean_jobs: params[8]
                         };
 
+                        // REAL live network difficulty: each job carries the block
+                        // template's own nBits, which encodes the target a hash
+                        // must reach to actually solve a block. Share difficulty
+                        // (below) is a much lower bar and never changes this; the
+                        // pool - not this page - broadcasts a block, and only when
+                        // a share also meets this network target.
+                        try {
+                            const netBits = parseInt(params[6], 16) >>> 0;
+                            currentBits = netBits;
+                            const netDiff = SHA256Crypto.nbitsToDifficulty(netBits);
+                            elements.networkDiff.textContent = formatDifficulty(netDiff);
+                            elements.networkDiff.title = 'Real Bitcoin network difficulty, read live from this job\'s block header (nBits ' +
+                                params[6] + '). Solving a block needs a hash at or below the matching target; the pool broadcasts it, not this page.';
+                        } catch (e) {}
+
                         // CPU: hand every worker a fresh random extranonce2.
                         workers.forEach(w => {
                             w.postMessage({
@@ -517,7 +559,8 @@ function runMinerApp() {
 
                     if (msg.method === 'mining.set_difficulty') {
                          window.currentPoolDifficulty = msg.params[0];
-                         elements.networkDiff.textContent = msg.params[0] + " (Pool Diff)";
+                         elements.shareDiff.textContent = msg.params[0] + ' (pool)';
+                         elements.shareDiff.title = 'Share difficulty: the pool credits a share when a hash meets this target. It is far below the network difficulty and does not by itself solve a block.';
                          broadcastToWorkers({ cmd: 'difficulty', difficulty: msg.params[0] });
                          if (gpu) prepareGpuContext();
                     }
@@ -594,7 +637,7 @@ function runMinerApp() {
         const w = new Worker('miner-worker.js');
         w.onmessage = (e) => {
             if (e.data.hashes) totalHashes += e.data.hashes;
-            if (e.data.share) submitShare(e.data.job_id, e.data.en2, e.data.ntime, e.data.nonce);
+            if (e.data.share) submitShare(e.data.job_id, e.data.en2, e.data.ntime, e.data.nonce, e.data.difficulty);
         };
         w.onerror = (err) => { console.error('Mining worker error', err); };
         return w;
@@ -608,13 +651,21 @@ function runMinerApp() {
     }
 
     // Submit a share found by any engine (already verified on the obvious path).
-    function submitShare(jobId, en2, ntime, nonceHex) {
+    function submitShare(jobId, en2, ntime, nonceHex, shareDiff) {
         if (!stratumWs || stratumWs.readyState !== 1) return;
         stratumWs.send(JSON.stringify({
             id: 4, method: 'mining.submit',
             params: [getSubmitUser(), jobId, en2, ntime, nonceHex]
         }));
         sharesFound++;
+        if (typeof shareDiff === 'number' && isFinite(shareDiff) && shareDiff > bestShareDiff) {
+            bestShareDiff = shareDiff;
+            const netDiff = currentBits ? SHA256Crypto.nbitsToDifficulty(currentBits) : 0;
+            elements.bestShare.textContent = formatDifficulty(shareDiff);
+            elements.bestShare.title = 'Rarest hash found so far, as a difficulty. Solving a block needs ' +
+                formatDifficulty(netDiff) + '; this best share is ' +
+                (netDiff > 0 ? (shareDiff / netDiff).toExponential(3) : '0') + ' of the way there.';
+        }
         elements.status.textContent = 'Share found & submitted! nonce ' + nonceHex + ' (total ' + sharesFound + ')';
     }
 
@@ -746,8 +797,9 @@ function runMinerApp() {
                 const nonce = results[1 + i];
                 // Re-verify on the CPU path before submitting.
                 if (SHA256Crypto.nonceIsValid(gpu.ctx, nonce)) {
+                    const shareDiff = SHA256Crypto.hashDifficulty(SHA256Crypto.hashNonce(gpu.ctx, nonce));
                     submitShare(window.currentStratumJob.job_id, gpu.en2, window.currentStratumJob.ntime,
-                        (nonce >>> 0).toString(16).padStart(8, '0'));
+                        (nonce >>> 0).toString(16).padStart(8, '0'), shareDiff);
                 }
             }
             gpu.baseNonce = (gpu.baseNonce + span) >>> 0;
@@ -839,6 +891,9 @@ function runMinerApp() {
         startTime = Date.now();
         totalHashes = 0;
         sharesFound = 0;
+        bestShareDiff = 0;
+        elements.bestShare.textContent = '0';
+        elements.bestShare.title = '';
         elements.startBtn.disabled = true;
         elements.stopBtn.disabled = false;
         elements.address.disabled = true;

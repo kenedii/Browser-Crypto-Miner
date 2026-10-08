@@ -55,6 +55,9 @@ function mineMode(mode, seconds, suggest) {
                 out.jobs++;
                 const p = msg.params;
                 const job = { job_id: p[0], prevhash: p[1], coinb1: p[2], coinb2: p[3], merkle_branch: p[4], version: p[5], nbits: p[6], ntime: p[7] };
+                // Real network difficulty from the job's own block header nBits.
+                out.netDiff = SC.nbitsToDifficulty(parseInt(p[6], 16) >>> 0);
+                out.nbits = p[6];
                 nonce = (Math.random() * 0xffffffff) >>> 0;
                 ctx = SC.buildJobContext(job, en1, Math.floor(Math.random() * 0xffffffff).toString(16).padStart(en2Size * 2, '0'), out.diff || 1);
             }
@@ -69,8 +72,9 @@ function mineMode(mode, seconds, suggest) {
     for (const mode of ['solo', 'pplns']) {
         const r = await mineMode(mode, 20, 1);
         const rate = r.hashes / 20;
-        console.log(`[${mode}] auth=${r.auth} jobs=${r.jobs} poolDiff=${r.diff} hashes=${r.hashes.toLocaleString()} (~${(rate / 1e6).toFixed(2)} MH/s) shareFound=${r.shareFound} err=${r.err || '-'}`);
-        if (r.diff) console.log(`        at poolDiff ${r.diff}: ~${Math.round((r.diff * Math.pow(2, 32)) / Math.max(rate, 1)).toLocaleString()}s per share (this machine)`);
+        console.log(`[${mode}] auth=${r.auth} jobs=${r.jobs} poolDiff(share)=${r.diff} hashes=${r.hashes.toLocaleString()} (~${(rate / 1e6).toFixed(2)} MH/s) shareFound=${r.shareFound} err=${r.err || '-'}`);
+        if (r.netDiff) console.log(`        real network difficulty (from live job nBits ${r.nbits}) = ${(r.netDiff / 1e12).toFixed(3)} T  <-- a block needs a hash this rare; a share does NOT`);
+        if (r.diff) console.log(`        at share diff ${r.diff}: ~${Math.round((r.diff * Math.pow(2, 32)) / Math.max(rate, 1)).toLocaleString()}s per share (this machine)`);
     }
     process.exit(0);
 })();

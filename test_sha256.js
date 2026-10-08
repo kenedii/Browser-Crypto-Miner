@@ -103,5 +103,42 @@ for (let i = 0; i < 3000; i++) {
 }
 agree ? ok('wordsMeetTarget agrees with nonceIsValid') : fail('target check disagreement');
 
+// ---- 6. real network difficulty from nBits -------------------------------
+const MAXT = BigInt('0x00000000FFFF0000000000000000000000000000000000000000000000000000');
+
+const d1 = SC.nbitsToDifficulty(0x1d00ffff);
+Math.abs(d1 - 1) < 1e-9 ? ok('nBits 0x1d00ffff -> network difficulty 1') : fail('nBits 0x1d00ffff -> ' + d1);
+
+const d16307 = SC.nbitsToDifficulty(0x1b0404cb);
+Math.abs(d16307 - 16307.420938523983) < 0.01
+    ? ok('nBits 0x1b0404cb -> network difficulty ~16307.42')
+    : fail('nBits 0x1b0404cb -> ' + d16307);
+
+JSON.stringify(Array.from(SC.nbitsToTargetWords(0x1d00ffff), (x) => x >>> 0)) === JSON.stringify(want1)
+    ? ok('nBits 0x1d00ffff target words == difficulty-1 target words')
+    : fail('nBits target words wrong');
+
+// hashDifficulty is measured on the same scale as the network difficulty, so a
+// found hash can be compared directly against it. Validate the ordering/value
+// against the raw digest bytes (independent of the wordsToValue path).
+let hdOk = true;
+for (let i = 0; i < 500; i++) {
+    const nonce = (Math.random() * 0xffffffff) >>> 0;
+    const words = SC.hashNonce(ctx, nonce, s);
+    const dispHex = Buffer.from(wordsToBytes(words)).reverse().toString('hex');
+    const expect = Number((MAXT * 1000000n) / BigInt('0x' + dispHex)) / 1000000;
+    if (Math.abs(SC.hashDifficulty(words) - expect) > 1e-6) { hdOk = false; fail('hashDifficulty mismatch nonce=' + nonce.toString(16)); break; }
+}
+hdOk ? ok('hashDifficulty == diff-1 target / displayed-hash value') : null;
+
+// A share target is a low bar; the real network target is far stricter. Random
+// hashes should fail the network target (i.e. share != block).
+const netWords = SC.nbitsToTargetWords(0x17021ef0);
+let met = false;
+for (let i = 0; i < 200; i++) {
+    if (SC.wordsMeetTarget(SC.hashNonce(ctx, (Math.random() * 0xffffffff) >>> 0, s), netWords)) { met = true; break; }
+}
+!met ? ok('200 random hashes all fail the real network target (share != block)') : fail('a random hash met the network target (?!)');
+
 console.log(failures === 0 ? '\nALL TESTS PASSED' : '\n' + failures + ' TEST(S) FAILED');
 process.exit(failures ? 1 : 0);
