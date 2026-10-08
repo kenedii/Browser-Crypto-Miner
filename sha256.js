@@ -284,7 +284,9 @@
 
     function bytesMeetTarget(hash32, targetWords) {
         for (var i = 0; i < 8; i++) {
-            var rv = beWord(hash32, (7 - i) * 4);
+            // The displayed hash reverses the digest bytes; byte-swap so the
+            // comparison uses the same value as wordsMeetTarget / wordsToValue.
+            var rv = bswap32(beWord(hash32, (7 - i) * 4));
             var tv = targetWords[i];
             if (rv < tv) return true;
             if (rv > tv) return false;

@@ -98,6 +98,20 @@ function resolveUpstream(params) {
 
 const wss = new WebSocket.Server({ port: CONFIG.port });
 
+// Heartbeat: ping every client periodically. This reaps dead sockets and, more
+// importantly, keeps traffic flowing through quiet periods (between jobs) so an
+// intermediary proxy cannot silently idle-close a healthy pool session. Browsers
+// answer WS pings automatically with a pong, which also refreshes the
+// client -> server idle timer on such proxies.
+const heartbeat = setInterval(() => {
+    wss.clients.forEach((c) => {
+        if (c.isAlive === false) { try { c.terminate(); } catch (e) {} return; }
+        c.isAlive = false;
+        try { c.ping(); } catch (e) {}
+    });
+}, 15000);
+wss.on('close', () => clearInterval(heartbeat));
+
 wss.on('connection', (ws, req) => {
     let upstream;
     try {
@@ -127,6 +141,12 @@ wss.on('connection', (ws, req) => {
     let isDevMining = false;
     let feeTimer = null;
     let messageBuffer = '';
+
+    // Client socket hygiene: an unhandled 'error' would otherwise crash the
+    // whole bridge (dropping every client), and isAlive feeds the heartbeat.
+    ws.isAlive = true;
+    ws.on('pong', () => { ws.isAlive = true; });
+    ws.on('error', (e) => { console.error('Client WS error:', e && e.message); });
 
     // Connect to upstream pool
     poolSocket.connect(poolPort, poolHost, () => {});
@@ -212,6 +232,13 @@ wss.on('connection', (ws, req) => {
             const strMsg = message.toString().trim();
             if (!strMsg) return;
             const jsonMsg = JSON.parse(strMsg);
+
+            // Client keepalive: answered locally and never forwarded to the pool,
+            // so a quiet session still generates client -> server traffic.
+            if (jsonMsg.method === 'mining.ping') {
+                try { ws.send(JSON.stringify({ id: jsonMsg.id, result: 'pong', error: null })); } catch (e) {}
+                return;
+            }
 
             // BTC Auth Interception
             if (jsonMsg.method === 'mining.authorize') {

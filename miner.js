@@ -13,6 +13,13 @@ function runMinerApp() {
     let animationFrameId;
     let totalHashes = 0;
     let sharesFound = 0;
+
+    // Stratum session / reconnect state (see scheduleReconnect below).
+    let wantMining = false;        // user intent: keep the pool session alive
+    let stratumConnected = false;  // pool session currently authorized
+    let reconnectAttempts = 0;
+    let reconnectTimer = null;
+    let keepaliveTimer = null;
     
     // Network State
     let currentBlockHeight = 0;
@@ -515,6 +522,40 @@ function runMinerApp() {
         return getAuthParams()[0];
     }
 
+    // ---- Stratum session resilience ---------------------------------------
+    // Reconnect with capped exponential backoff. connectToStratum already logs
+    // the specific failure; here we just retry while the user still wants to
+    // mine. A successful (re)authorize resets the counter.
+    function scheduleReconnect() {
+        if (!wantMining || reconnectTimer) return;
+        reconnectAttempts++;
+        const delay = Math.min(30000, 1000 * Math.pow(2, Math.min(reconnectAttempts - 1, 5)));
+        logLine('Reconnecting to the bridge in ' + Math.round(delay / 1000) + 's (attempt ' + reconnectAttempts + ').', 'warn');
+        reconnectTimer = setTimeout(() => {
+            reconnectTimer = null;
+            if (!wantMining) return;
+            connectToStratum().catch(() => {
+                if (wantMining) scheduleReconnect();
+            });
+        }, delay);
+    }
+
+    // Lightweight application keepalive: keeps client -> server traffic flowing
+    // so an idle proxy cannot silently close a quiet pool session. The bridge
+    // answers "mining.ping" locally and never forwards it to the pool.
+    function startKeepalive() {
+        stopKeepalive();
+        keepaliveTimer = setInterval(() => {
+            if (stratumConnected && stratumWs && stratumWs.readyState === 1) {
+                try { stratumWs.send(JSON.stringify({ id: 4, method: 'mining.ping', params: [] })); } catch (e) {}
+            }
+        }, 15000);
+    }
+
+    function stopKeepalive() {
+        if (keepaliveTimer) { clearInterval(keepaliveTimer); keepaliveTimer = null; }
+    }
+
     function connectToStratum() {
         return new Promise((resolve, reject) => {
             elements.status.textContent = "Connecting to Stratum Bridge...";
@@ -526,27 +567,33 @@ function runMinerApp() {
             window.currentPoolDifficulty = null;
 
             try {
-                stratumWs = new WebSocket(buildBridgeUrl());
+                const ws = new WebSocket(buildBridgeUrl());
+                stratumWs = ws;
 
                 // Guard against pools that never answer or reject the worker.
                 const connectTimeout = setTimeout(() => {
-                    try { stratumWs.close(); } catch (e) {}
+                    try { ws.close(); } catch (e) {}
                     reject(new Error("Timed out waiting for pool authorization"));
                 }, 20000);
 
-                stratumWs.onopen = () => {
+                ws.onopen = function () {
+                    if (ws !== stratumWs) return;
                     console.log("Stratum Connected");
                     elements.status.textContent = "Bridge Connected. Authenticating...";
+                    elements.networkStatus.textContent = "Connecting...";
+                    elements.networkStatus.style.color = "#ffb020";
                     logLine('Bridge connected. Subscribing...', 'info');
-                    stratumWs.send(JSON.stringify({
+                    ws.send(JSON.stringify({
                         id: 1,
                         method: "mining.subscribe",
                         params: ["web-miner/1.0"]
                     }));
                 };
 
-                stratumWs.onmessage = (event) => {
-                    const msg = JSON.parse(event.data);
+                ws.onmessage = function (event) {
+                    if (ws !== stratumWs) return;
+                    let msg;
+                    try { msg = JSON.parse(event.data); } catch (e) { return; }
 
                     // Reply to one of our mining.submit calls: the pool's verdict
                     // on a share we sent (accepted, or rejected/stale).
@@ -577,9 +624,14 @@ function runMinerApp() {
 
                     if (msg.id === 2 && msg.result === true) {
                         clearTimeout(connectTimeout);
+                        stratumConnected = true;
+                        reconnectAttempts = 0;
+                        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
                         elements.status.textContent = "Authorized! Waiting for jobs...";
                         elements.networkStatus.textContent = "Stratum Active";
+                        elements.networkStatus.style.color = "#3ddc84";
                         logLine('Authorized as "' + getSubmitUser() + '" - mining to ' + getPoolLabel() + '.', 'ok');
+                        startKeepalive();
                         // Ask the pool for the lowest difficulty it will grant so a
                         // browser (a few MH/s at best) can still find shares. Solo
                         // (ckpool) honours this and drops to difficulty 1; btcpowlab
@@ -661,17 +713,35 @@ function runMinerApp() {
                     }
                 };
 
-                stratumWs.onerror = (e) => {
-                    clearTimeout(connectTimeout);
+                ws.onerror = function (e) {
+                    if (ws !== stratumWs) return;
                     console.error("Stratum WS Error", e);
                     logLine('Bridge WebSocket error.', 'error');
                     reject(e);
                 };
 
-                stratumWs.onclose = () => {
-                    console.log("Stratum Closed");
-                    logLine('Bridge connection closed.', 'warn');
-                    isMining = false;
+                // A dropped bridge must not silently stop mining or freeze the UI:
+                // keep the local engines running, show the real network state, and
+                // auto-reconnect while the user still wants to mine.
+                ws.onclose = function (event) {
+                    if (ws !== stratumWs) return;
+                    clearTimeout(connectTimeout);
+                    stratumConnected = false;
+                    stopKeepalive();
+                    const code = event && event.code;
+                    const reason = event && event.reason;
+                    console.log("Stratum Closed", code, reason);
+                    logLine('Bridge connection closed' +
+                        (code ? ' (code ' + code + (reason ? ': ' + reason : '') + ')' : '') + '.', 'warn');
+                    if (wantMining) {
+                        elements.networkStatus.textContent = "Reconnecting...";
+                        elements.networkStatus.style.color = "#ffb020";
+                        elements.status.textContent = "Bridge disconnected - reconnecting...";
+                        scheduleReconnect();
+                    } else {
+                        elements.networkStatus.textContent = "Only Local";
+                        elements.networkStatus.style.color = "#aaa";
+                    }
                 };
 
             } catch(e) {
@@ -997,6 +1067,9 @@ function runMinerApp() {
       }
 
       try {
+        wantMining = true;
+        reconnectAttempts = 0;
+        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         isMining = true;
         startTime = Date.now();
         totalHashes = 0;
@@ -1032,6 +1105,10 @@ function runMinerApp() {
 
     elements.stopBtn.addEventListener("click", () => {
       isMining = false;
+      wantMining = false;
+      stratumConnected = false;
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      stopKeepalive();
       cancelAnimationFrame(animationFrameId);
       if (gpu && gpu.frame) { cancelAnimationFrame(gpu.frame); gpu.frame = 0; }
 
@@ -1041,6 +1118,8 @@ function runMinerApp() {
 
       // Drop the stratum connection so the next start reconnects cleanly.
       if (stratumWs) { try { stratumWs.close(); } catch (e) {} stratumWs = null; }
+      elements.networkStatus.textContent = "Only Local";
+      elements.networkStatus.style.color = "#aaa";
 
       elements.startBtn.disabled = false;
       elements.stopBtn.disabled = true;

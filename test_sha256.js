@@ -95,13 +95,66 @@ SC.bytesMeetTarget(SC.hexToBytes('00000000FFFF0000' + '0'.repeat(48)), easy) ===
     ? ok('sub-1 difficulty widens the target (browser-usable shares)')
     : fail('sub-1 difficulty did not widen target');
 
-// ---- 5. wordsMeetTarget agrees with nonceIsValid --------------------------
-let agree = true;
-for (let i = 0; i < 3000; i++) {
+// ---- 5. Share gating: bytes/words target checks vs a BigInt reference ------
+// A hash is a share when its byte-reversed ("displayed") value is below the
+// target. The real network target is far too strict to ever be met by a random
+// nonce, so the previous wordsMeetTarget-vs-nonceIsValid loop passed vacuously
+// (both always said "no"). Use a low difficulty so genuine shares actually
+// occur and exercise the comparison end to end. This is the regression guard
+// for a missing bswap32 in bytesMeetTarget (which silently vetoed real shares).
+const lowDiff = 1e-6;
+const lowTarget = SC.computeTargetWords(lowDiff);
+const lowCtx = SC.buildJobContext(JOB, EN1, '00000000', lowDiff);
+let lowTargetVal = 0n;
+for (let i = 0; i < 8; i++) lowTargetVal = (lowTargetVal << 32n) | BigInt(lowTarget[i] >>> 0);
+
+let sharesSeen = 0, bytesAccepted = 0, disagree = 0;
+for (let i = 0; i < 400000; i++) {
     const nonce = (Math.random() * 0xffffffff) >>> 0;
-    if (SC.wordsMeetTarget(SC.hashNonce(ctx, nonce, s), ctx.target) !== SC.nonceIsValid(ctx, nonce)) { agree = false; break; }
+    const digest = SC.doubleSha256(SC.headerForNonce(ctx, nonce));
+    const words = SC.hashNonce(ctx, nonce, s);
+    let val = 0n;
+    for (let k = 0; k < 8; k++) val = (val << 32n) | BigInt(SC.bswap32(words[7 - k]) >>> 0);
+    const ref = val < lowTargetVal;
+
+    const wOk = SC.wordsMeetTarget(words, lowTarget);
+    const bOk = SC.bytesMeetTarget(digest, lowTarget);
+    const vOk = SC.nonceIsValid(lowCtx, nonce);
+
+    if (ref) { sharesSeen++; if (bOk) bytesAccepted++; }
+    if (wOk !== ref || bOk !== ref || vOk !== ref) {
+        disagree++;
+        if (disagree < 3) fail('target-check disagreement nonce=' + nonce.toString(16) +
+            ' ref=' + ref + ' words=' + wOk + ' bytes=' + bOk + ' nonceIsValid=' + vOk);
+    }
 }
-agree ? ok('wordsMeetTarget agrees with nonceIsValid') : fail('target check disagreement');
+sharesSeen > 0
+    ? ok('low-diff scan produced ' + sharesSeen + ' genuine shares (real coverage)')
+    : fail('low-diff scan produced no shares (cannot exercise the target check)');
+sharesSeen > 0 && bytesAccepted === sharesSeen
+    ? ok('bytesMeetTarget accepts every genuine share (' + bytesAccepted + '/' + sharesSeen + ')')
+    : fail('bytesMeetTarget rejected genuine shares (' + bytesAccepted + '/' + sharesSeen + ')');
+disagree === 0
+    ? ok('wordsMeetTarget / bytesMeetTarget / nonceIsValid all match the BigInt reference')
+    : fail(disagree + ' target-check disagreements vs reference');
+
+// Deterministic boundary check: build the digest whose displayed value is a
+// chosen number and confirm bytesMeetTarget compares that value, not the raw
+// digest. One below the diff-1 target passes; one above fails.
+const t1Words = SC.computeTargetWords(1);
+let t1Val = 0n;
+for (let i = 0; i < 8; i++) t1Val = (t1Val << 32n) | BigInt(t1Words[i] >>> 0);
+const digestForValue = (v) => {
+    const be = new Uint8Array(32);
+    for (let i = 31; i >= 0; i--) { be[i] = Number(v & 0xffn); v >>= 8n; }
+    return be.reverse();
+};
+SC.bytesMeetTarget(digestForValue(t1Val - 1n), t1Words) === true
+    ? ok('bytesMeetTarget accepts a digest one below the diff-1 target')
+    : fail('bytesMeetTarget rejected a digest just below the diff-1 target');
+SC.bytesMeetTarget(digestForValue(t1Val + 1n), t1Words) === false
+    ? ok('bytesMeetTarget rejects a digest one above the diff-1 target')
+    : fail('bytesMeetTarget accepted a digest just above the diff-1 target');
 
 // ---- 6. real network difficulty from nBits -------------------------------
 const MAXT = BigInt('0x00000000FFFF0000000000000000000000000000000000000000000000000000');
