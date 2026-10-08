@@ -5,7 +5,8 @@
   "main": "bridge.js",
   "scripts": {
     "start": "node bridge.js",
-    "test-local": "node test_local.js"
+    "test-local": "node test_local.js",
+    "test-modes": "node test_modes.js"
   },
   "dependencies": {
     "ws": "^8.19.0"

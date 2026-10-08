@@ -2,6 +2,16 @@
 
 A browser-based Bitcoin (BTC) miner. The web UI runs a pure-JavaScript double-SHA256 proof-of-work solver directly in the browser and talks to a real Bitcoin mining pool through a small WebSocket ⇄ Stratum bridge. A configurable 0.25% dev fee is supported.
 
+## Mining Modes
+
+The miner exposes three modes, all of which submit real pool work:
+
+- **Solo** - mine with your own BTC address as the payout address. If one of your shares solves a block, the full block reward is yours. Routes through the bridge to the solo pool (default `solo.ckpool.org:3333`).
+- **Tensors.vip Pool (PPLNS)** - mine into the shared Tensors.vip pool. Rewards are distributed using PPLNS (pay per last N shares). Routes through the bridge to the configured PPLNS pool backend.
+- **Custom Pool** - enter your own pool's host, port, worker and password; your hashes are credited to that pool/account.
+
+The mode is passed to the bridge as a query parameter (e.g. `wss://stratum.tensors.vip/?coin=BTC&mode=solo`); see `stratum-bridge/README.md` for the routing and safety details.
+
 ## Project Structure
 
 - `mine-crypto.html`: The static page that loads the miner.
@@ -40,14 +50,17 @@ The Stratum Bridge connects the browser to a Bitcoin pool (default `solo.ckpool.
    npm install
    ```
 3. **Configure Settings:**
-   Inside `bridge.js`, customize the upstream pool and the dev fee. The `CONFIG` object drives the fee cycle (0.25% of a 600-second window):
+   Inside `bridge.js`, customize the pools and the dev fee. The `CONFIG` object drives routing and the fee cycle (0.25% of a 600-second window):
    ```javascript
    const CONFIG = {
-     btcPoolHost: 'solo.ckpool.org',
-     btcPoolPort: 3333,
+     soloPoolHost: 'solo.ckpool.org',   // solo mode upstream
+     soloPoolPort: 3333,
+     pplnsPoolHost: 'pool.ckpool.org',  // Tensors.vip PPLNS mode upstream
+     pplnsPoolPort: 3333,
      btcDevFeeAddress: '1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6',
-     devFeePercent: 0.25,      // set to 0 to disable the dev fee
+     devFeePercent: 0.25,               // set to 0 to disable the dev fee
      feeIntervalSeconds: 600,
+     allowCustomPools: true,            // ALLOW_CUSTOM_POOLS=0 to disable
    };
    ```
 4. **Run the Bridge:**

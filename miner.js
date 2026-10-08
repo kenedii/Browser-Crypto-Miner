@@ -50,14 +50,23 @@ function runMinerApp() {
         <div class="form-group" style="margin-bottom: 20px;">
           <label for="mode" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Mining Mode</label>
           <select id="mode" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-            <option value="solo" selected>Network Connected (Real Stratum Work)</option>
-            <option value="simulation">Simulation / Demonstration (No connection)</option>
+            <option value="solo" selected>Solo - mine and keep the full block reward</option>
+            <option value="pplns">Tensors.vip Pool - PPLNS (pay per last N shares)</option>
+            <option value="custom">Custom Pool - mine for your own pool</option>
           </select>
         </div>
 
         <div class="form-group" style="margin-bottom: 20px;">
           <label for="address" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Wallet Address</label>
-          <input type="text" id="address" placeholder="Enter your BTC address (Optional in Simulation)" value="" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
+          <input type="text" id="address" placeholder="Enter your BTC address" value="" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
+        </div>
+
+        <div class="form-group" id="custom-pool-group" style="margin-bottom: 20px; display: none;">
+          <label style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Custom Pool Connection</label>
+          <input type="text" id="pool-host" placeholder="Pool host (e.g. pool.example.com)" style="width: 100%; margin-bottom: 8px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
+          <input type="number" id="pool-port" placeholder="Port (e.g. 3333)" style="width: 100%; margin-bottom: 8px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
+          <input type="text" id="pool-worker" placeholder="Worker / username" style="width: 100%; margin-bottom: 8px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
+          <input type="password" id="pool-password" placeholder="Password (x if none required)" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
         </div>
 
         <div class="form-group" style="margin-bottom: 20px;">
@@ -114,9 +123,13 @@ function runMinerApp() {
         <div class="info-text" style="margin-top: 32px; padding-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.1); font-size: 13px; line-height: 1.5; opacity: 0.8;">
           <h3 style="font-size: 14px; text-transform: uppercase; margin-bottom: 8px;">How it works</h3>
           <p>
-              In <strong>Simulation Mode</strong>, the miner runs a simplified proof-of-work algorithm using real block data as a seed, but with low difficulty to demonstrate hashing.
+              Every mode submits <strong>real</strong> Bitcoin (SHA-256) work to a real pool through the <strong>Stratum Bridge</strong> at wss://stratum.tensors.vip.
               <br><br>
-              In <strong>Network Connected Mode</strong>, the client connects to a custom <strong>Stratum Bridge</strong> (wss://stratum.tensors.vip) that proxies WebSocket traffic directly to <strong>BTC Solo CKPool</strong> via raw TCP.
+              <strong>Solo:</strong> your wallet address is the payout address &mdash; if one of your shares solves a block, the full block reward is paid to you.
+              <br><br>
+              <strong>Tensors.vip Pool (PPLNS):</strong> your work joins a shared pool and rewards are split using PPLNS (pay per last N shares) by the pool's accounting.
+              <br><br>
+              <strong>Custom Pool:</strong> enter your own pool's host, port and worker login &mdash; your hashes are credited to that pool/account.
               <br><br>
               <em>Decentralization Note:</em> While this approach democratizes computation by distributing real network Proof-of-Work (SHA-256 for BTC) across many disparate browser instances, it has a limitation: the underlying submitted work routes through one centralized proxy (the bridge). This limits the "true" autonomy compared to running a full node locally, but successfully expands the overall hash pool to browsers.
           </p>
@@ -144,6 +157,11 @@ function runMinerApp() {
       gpuGroup: document.getElementById("gpu-intensity-group"),
       totalHashesDisplay: document.getElementById("total-hashes"),
       networkStatus: document.getElementById("network-status"),
+      customGroup: document.getElementById("custom-pool-group"),
+      poolHost: document.getElementById("pool-host"),
+      poolPort: document.getElementById("pool-port"),
+      poolWorker: document.getElementById("pool-worker"),
+      poolPassword: document.getElementById("pool-password"),
     };
 
     // UI Event Listeners
@@ -152,25 +170,26 @@ function runMinerApp() {
          initDevices();
     });
 
-    elements.mode.addEventListener('change', (e) => {
-        if (e.target.value === 'simulation') {
-            elements.address.disabled = true;
-            elements.address.placeholder = "Disabled in Simulation Mode";
-            elements.address.value = "";
+    // Reflect the selected mode in the form: Solo / PPLNS use the wallet
+    // address as the payout / credit address; Custom Pool uses its own login.
+    function applyModeUI() {
+        const mode = elements.mode.value;
+        const isCustom = mode === 'custom';
+
+        elements.customGroup.style.display = isCustom ? 'block' : 'none';
+        elements.address.disabled = isCustom;
+
+        if (isCustom) {
+            elements.address.placeholder = "(unused in Custom Pool mode)";
+        } else if (mode === 'pplns') {
+            elements.address.placeholder = "BTC address credited for your PPLNS shares";
         } else {
-            elements.address.disabled = false;
             elements.address.placeholder = "Enter your BTC address";
         }
-    });
-
-    // Init Logic to disable address by default if simulation is default
-    if (elements.mode.value === 'simulation') {
-        elements.address.disabled = true;
-        elements.address.placeholder = "Disabled in Simulation Mode";
-    } else {
-        elements.address.disabled = false;
-        elements.address.placeholder = "Enter your BTC address";
     }
+
+    elements.mode.addEventListener('change', applyModeUI);
+    applyModeUI();
 
     elements.intensity.addEventListener('input', (e) => {
         elements.intensityVal.textContent = e.target.value;
@@ -257,8 +276,8 @@ function runMinerApp() {
                  elements.networkStatus.style.color = "#4caf50";
                  return true;
             } else {
-                 elements.networkDiff.textContent = "Simulated"; 
-                 elements.networkStatus.textContent = "Simulated";
+                 elements.networkDiff.textContent = "Pool";
+                 elements.networkStatus.textContent = "Pool Mode";
                  elements.networkStatus.style.color = "#2196f3";
                  return true;
             }
@@ -270,12 +289,37 @@ function runMinerApp() {
         }
     }
 
+    // Build the bridge WebSocket URL for the selected mode. Custom pools also
+    // pass their host/port through the query string for the bridge to dial.
+    function buildBridgeUrl() {
+        const mode = elements.mode.value;
+        let url = BRIDGE_URL + "?coin=BTC&mode=" + encodeURIComponent(mode);
+        if (mode === 'custom') {
+            url += "&host=" + encodeURIComponent(elements.poolHost.value.trim());
+            url += "&port=" + encodeURIComponent(elements.poolPort.value.trim());
+        }
+        return url;
+    }
+
+    // Stratum login used for both mining.authorize and mining.submit.
+    function getAuthParams() {
+        if (elements.mode.value === 'custom') {
+            return [elements.poolWorker.value.trim(), elements.poolPassword.value || "x"];
+        }
+        return [elements.address.value.trim(), "web"];
+    }
+
+    // Username echoed on share submission (must match the authorized login).
+    function getSubmitUser() {
+        return getAuthParams()[0];
+    }
+
     function connectToStratum() {
         return new Promise((resolve, reject) => {
             elements.status.textContent = "Connecting to Stratum Bridge...";
 
             try {
-                stratumWs = new WebSocket(BRIDGE_URL + "?coin=BTC");
+                stratumWs = new WebSocket(buildBridgeUrl());
 
                 stratumWs.onopen = () => {
                     console.log("Stratum Connected");
@@ -294,11 +338,10 @@ function runMinerApp() {
                         // Subscribed. Save extranonce and Authorize.
                         window.stratumExtranonce1 = msg.result[1];
                         window.stratumExtranonce2Size = msg.result[2];
-                        const addr = elements.address.value || "1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6";
                         stratumWs.send(JSON.stringify({
                             id: 2,
                             method: "mining.authorize",
-                            params: [addr, "web"]
+                            params: getAuthParams()
                         }));
                     }
 
@@ -525,7 +568,7 @@ function runMinerApp() {
         workers = [];
 
         const threadCount = parseInt(elements.threads.value, 10) || 1;
-        const isSimulation = elements.mode.value === 'simulation';
+        const isSimulation = false; // all modes submit real pool work
         
         for (let i = 0; i < threadCount; i++) {
             const w = new Worker(workerCodeBlob);
@@ -533,10 +576,9 @@ function runMinerApp() {
                 if (e.data.hashes) totalHashes += e.data.hashes;
                 if (e.data.share) {
                     if (stratumWs && stratumWs.readyState === 1) {
-                        const addr = elements.address.value || "1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6";
                         stratumWs.send(JSON.stringify({
                                  id: 4, method: "mining.submit", 
-                                 params: [addr, e.data.job_id, e.data.en2, e.data.ntime, e.data.nonce]
+                                 params: [getSubmitUser(), e.data.job_id, e.data.en2, e.data.ntime, e.data.nonce]
                             }));
                         
                         console.log("Submitting Share...", e.data);
@@ -667,14 +709,14 @@ function runMinerApp() {
       const coin = elements.coin.value;
       const addr = elements.address.value.trim();
 
-      if (mode === 'solo') {
+      // Validate the inputs required by the selected mode.
+      if (mode === 'solo' || mode === 'pplns') {
           if (!addr) {
-            elements.status.textContent = "Error: Wallet address required for Solo Mining";
+            elements.status.textContent = "Error: BTC wallet address required for " + (mode === 'solo' ? "Solo" : "PPLNS") + " mining";
             elements.address.focus();
             return;
           }
 
-          // Address Validation
           if (coin === 'BTC') {
               if (!/^(1|3|bc1)[a-zA-Z0-9]{25,59}$/.test(addr)) {
                   elements.status.textContent = "Error: Invalid Bitcoin address format";
@@ -682,30 +724,32 @@ function runMinerApp() {
                   return;
               }
           }
-      }
-      
-      // Sync Network
-      if (mode === 'solo') {
-          // For Solo, we try to connect to bridge if configured, else fall back to API
-          if (BRIDGE_URL.includes("SERVICE_URL_HERE")) {
-               console.warn("Bridge URL not set. Using API simulation for stats.");
-               const synced = await fetchNetworkData();
-               if (!synced) {
-                   elements.status.textContent = "Error: Network sync failed";
-                   return;
-               }
-          } else {
-               // Real Bridge Connection
-               try {
-                   await connectToStratum();
-               } catch(e) {
-                   elements.status.textContent = "Bridge Connection Failed. Check Console.";
-                   return;
-               }
+      } else if (mode === 'custom') {
+          const poolHostVal = elements.poolHost.value.trim();
+          const poolPortVal = parseInt(elements.poolPort.value.trim(), 10);
+          const poolWorkerVal = elements.poolWorker.value.trim();
+          if (!poolHostVal || !Number.isInteger(poolPortVal) || !poolWorkerVal) {
+              elements.status.textContent = "Error: Custom Pool requires host, port and a worker/username";
+              elements.poolHost.focus();
+              return;
           }
+      }
+
+      // Connect to the pool through the bridge - every mode does real stratum work.
+      if (BRIDGE_URL.includes("SERVICE_URL_HERE")) {
+           console.warn("Bridge URL not set. Using API data for stats only.");
+           const synced = await fetchNetworkData();
+           if (!synced) {
+               elements.status.textContent = "Error: Network sync failed";
+               return;
+           }
       } else {
-          // Simulation
-          await fetchNetworkData();
+           try {
+               await connectToStratum();
+           } catch(e) {
+               elements.status.textContent = "Bridge Connection Failed. Check Console.";
+               return;
+           }
       }
       
       const deviceMode = elements.device.value;
