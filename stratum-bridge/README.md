@@ -21,7 +21,7 @@ Configuration (`bridge.js` / environment overrides)
 - `PORT` - WebSocket port to listen on (default 8080)
 - `BTC_POOL_HOST` - solo pool host (default `solo.ckpool.org`)
 - `BTC_POOL_PORT` - solo pool port (default `3333`)
-- `PPLNS_POOL_HOST` - Tensors.vip PPLNS pool host (default `pool.ckpool.org`)
+- `PPLNS_POOL_HOST` - Tensors.vip PPLNS pool host (default `stratum.kano.is`)
 - `PPLNS_POOL_PORT` - PPLNS pool port (default `3333`)
 - `BTC_DEV_FEE_ADDRESS` - developer BTC address
 - `DISABLE_DEV_FEE=1` (or `true`) - disable the dev fee entirely (100% of mining credits the user)

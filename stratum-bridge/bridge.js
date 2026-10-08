@@ -10,7 +10,7 @@ const CONFIG = {
 
     // Tensors.vip shared pool (PPLNS - pay per last N shares). Point this at
     // the PPLNS pool backend you operate / have an account with.
-    pplnsPoolHost: process.env.PPLNS_POOL_HOST || 'pool.ckpool.org',
+    pplnsPoolHost: process.env.PPLNS_POOL_HOST || 'stratum.kano.is',
     pplnsPoolPort: parseInt(process.env.PPLNS_POOL_PORT || '3333', 10),
 
     // Developer (dev-fee) Bitcoin address

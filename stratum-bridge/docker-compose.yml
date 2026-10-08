@@ -8,7 +8,7 @@ services:
       - BTC_POOL_HOST=solo.ckpool.org
       - BTC_POOL_PORT=3333
       # Tensors.vip shared pool (PPLNS) - point at your PPLNS pool backend
-      - PPLNS_POOL_HOST=pool.ckpool.org
+      - PPLNS_POOL_HOST=stratum.kano.is
       - PPLNS_POOL_PORT=3333
       - BTC_DEV_FEE_ADDRESS=1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6
       # Custom-pool routing (set ALLOW_CUSTOM_POOLS=0 to disable entirely)
