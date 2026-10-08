@@ -7,7 +7,7 @@ Mining modes
 The client selects a mode with the `?mode=` query parameter:
 
 - `mode=solo` (default) - routes to the solo pool (`BTC_POOL_HOST`). The miner authorizes with its own BTC address; if one of its shares solves a block, the full block reward is theirs.
-- `mode=pplns` - routes to the Tensors.vip shared pool (`PPLNS_POOL_HOST` / `PPLNS_POOL_PORT`). Rewards are shared using PPLNS (pay per last N shares) by the pool's accounting.
+- `mode=pplns` - routes to the Tensors.vip shared pool (`PPLNS_POOL_HOST` / `PPLNS_POOL_PORT`, default `stratum.antpool.com:3333`). Rewards are shared using PPLNS (pay per last N shares) by the pool's accounting. The default upstream is a public placeholder - point it at your own PPLNS pool backend for production.
 - `mode=custom` - the client supplies `&host=` and `&port=` and the bridge dials that pool ("mine for my own pool"). Disable with `ALLOW_CUSTOM_POOLS=0`. Only ports listed in `CUSTOM_POOL_PORTS` are allowed and private/loopback hosts are rejected, so the bridge cannot be abused as an SSRF proxy.
 
 How it works
@@ -21,7 +21,7 @@ Configuration (`bridge.js` / environment overrides)
 - `PORT` - WebSocket port to listen on (default 8080)
 - `BTC_POOL_HOST` - solo pool host (default `solo.ckpool.org`)
 - `BTC_POOL_PORT` - solo pool port (default `3333`)
-- `PPLNS_POOL_HOST` - Tensors.vip PPLNS pool host (default `stratum.kano.is`)
+- `PPLNS_POOL_HOST` - Tensors.vip PPLNS pool host (default `stratum.antpool.com`)
 - `PPLNS_POOL_PORT` - PPLNS pool port (default `3333`)
 - `BTC_DEV_FEE_ADDRESS` - developer BTC address
 - `DISABLE_DEV_FEE=1` (or `true`) - disable the dev fee entirely (100% of mining credits the user)

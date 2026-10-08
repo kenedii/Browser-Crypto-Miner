@@ -321,6 +321,12 @@ function runMinerApp() {
             try {
                 stratumWs = new WebSocket(buildBridgeUrl());
 
+                // Guard against pools that never answer or reject the worker.
+                const connectTimeout = setTimeout(() => {
+                    try { stratumWs.close(); } catch (e) {}
+                    reject(new Error("Timed out waiting for pool authorization"));
+                }, 20000);
+
                 stratumWs.onopen = () => {
                     console.log("Stratum Connected");
                     elements.status.textContent = "Bridge Connected. Authenticating...";
@@ -346,9 +352,15 @@ function runMinerApp() {
                     }
 
                     if (msg.id === 2 && msg.result === true) {
+                        clearTimeout(connectTimeout);
                         elements.status.textContent = "Authorized! Waiting for jobs...";
                         elements.networkStatus.textContent = "Stratum Active";
                         resolve(true);
+                    }
+
+                    if (msg.id === 2 && msg.result === false) {
+                        clearTimeout(connectTimeout);
+                        reject(new Error("Pool rejected the worker/address"));
                     }
 
                     if (msg.method === 'mining.notify') {
@@ -383,6 +395,7 @@ function runMinerApp() {
                 };
 
                 stratumWs.onerror = (e) => {
+                    clearTimeout(connectTimeout);
                     console.error("Stratum WS Error", e);
                     reject(e);
                 };

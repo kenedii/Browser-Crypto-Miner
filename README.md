@@ -55,7 +55,7 @@ The Stratum Bridge connects the browser to a Bitcoin pool (default `solo.ckpool.
    const CONFIG = {
      soloPoolHost: 'solo.ckpool.org',   // solo mode upstream
      soloPoolPort: 3333,
-     pplnsPoolHost: 'stratum.kano.is',  // Tensors.vip PPLNS mode upstream
+     pplnsPoolHost: 'stratum.antpool.com',  // Tensors.vip PPLNS mode upstream
      pplnsPoolPort: 3333,
      btcDevFeeAddress: '1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6',
      devFeePercent: 0.25,               // set to 0 to disable the dev fee
