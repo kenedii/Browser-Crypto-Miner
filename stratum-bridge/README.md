@@ -18,7 +18,7 @@ How it works
 
 Share difficulty
 
-- The frontend defaults to `solo`. After authorizing, its miner sends `mining.suggest_difficulty` (1) so slow clients get a usable share target: ckpool (solo) honours it and drops to difficulty 1; btcpowlab ignores it and keeps its fixed difficulty. The bridge just relays the method upstream. Note this is the **share** difficulty only - the **network** difficulty (decoded from each job's `nBits`) is separate, and the pool - not the browser - checks it and broadcasts any block, so a low share difficulty can never make the network reject a block.
+- The frontend defaults to `solo`. In solo mode its miner sends `mining.suggest_difficulty` (1) so the browser gets a low *search* target; ckpool relays that value back but still enforces its own minimum (10,000 for solo) on submission, so the miner latches that minimum as its submit floor and never sends a share below it. On a vardiff pool (btcpowlab) the miner instead tracks the pool's current advertised difficulty exactly. The bridge just relays `mining.suggest_difficulty` upstream unchanged. Note this is the **share** difficulty only - the **network** difficulty (decoded from each job's `nBits`) is separate, and the pool - not the browser - checks it and broadcasts any block, so a low share difficulty can never make the network reject a block.
 
 Configuration (`bridge.js` / environment overrides)
 

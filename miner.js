@@ -42,11 +42,16 @@ function runMinerApp() {
   const BRIDGE_URL = "wss://stratum.tensors.vip";
     let stratumWs = null;
     let suggestedDifficulty = false;
-    // Highest share difficulty the pool has advertised this session. ckpool
-    // solo reports a low "search" difficulty after mining.suggest_difficulty but
-    // still rejects anything below its own minimum ("Above target"), so this
-    // running maximum is the bar a found hash must clear to be worth submitting.
+    // The pool's minimum share difficulty: the bar a found hash must clear to be
+    // worth submitting. How it is derived depends on the pool:
+    //   - vardiff pools (btcpowlab, custom): the *current* advertised difficulty
+    //     is the live accept bar and it moves up/down, so we track it exactly.
+    //   - ckpool solo: it always enforces its own minimum (10,000 for solo). Its
+    //     mining.suggest_difficulty only lowers the *reported search* difficulty;
+    //     shares below the minimum are still rejected as "Above target". So for
+    //     solo we latch the *highest* difficulty the pool advertises.
     let poolSubmitFloor = 0;
+    let poolLatchHighestDifficulty = false; // true in solo mode; set per connection
 
     // Clear loading message and inject UI
     container.innerHTML = '';
@@ -569,6 +574,7 @@ function runMinerApp() {
             // Fresh connection -> forget the previous session's job/difficulty.
             suggestedDifficulty = false;
             poolSubmitFloor = 0;
+            poolLatchHighestDifficulty = (elements.mode.value === 'solo');
             window.currentStratumJob = null;
             window.currentPoolDifficulty = null;
 
@@ -638,18 +644,9 @@ function runMinerApp() {
                         elements.networkStatus.style.color = "#3ddc84";
                         logLine('Authorized as "' + getSubmitUser() + '" - mining to ' + getPoolLabel() + '.', 'ok');
                         startKeepalive();
-                        // Ask for a low search difficulty so a browser (a few MH/s
-                        // at best) still finds "best share" candidates to display.
-                        // NOTE: this only lowers the difficulty the pool *reports*
-                        // for searching; ckpool solo still enforces its own (much
-                        // higher) minimum on submission, so offerShare() only ever
-                        // submits shares that clear poolSubmitFloor.
-                        if (!suggestedDifficulty) {
-                            suggestedDifficulty = true;
-                            try {
-                                stratumWs.send(JSON.stringify({ id: 3, method: "mining.suggest_difficulty", params: [1] }));
-                            } catch (e) {}
-                        }
+                        // In solo mode we ask for a low *search* difficulty, but
+                        // only once the pool has told us its own minimum - see the
+                        // set_difficulty handler below.
                         resolve(true);
                     }
 
@@ -713,20 +710,38 @@ function runMinerApp() {
 
                     if (msg.method === 'mining.set_difficulty') {
                          const d = msg.params[0];
-                         // Search difficulty (the bar a found hash must beat) vs. the
-                         // pool's enforced minimum. ckpool solo advertises a low
-                         // search difficulty after mining.suggest_difficulty but
-                         // still rejects anything below its own minimum as "Above
-                         // target", so the highest value it ever advertises is the
-                         // bar a share must clear before it is worth submitting.
+                         // The pool's advertised share difficulty. For a vardiff
+                         // pool (btcpowlab, custom) that IS the live accept bar and
+                         // it moves up and down, so track it exactly - a latched
+                         // maximum would stop us submitting once vardiff lowers it.
+                         // ckpool solo never lowers what it will *accept*: its low
+                         // value is only the mining.suggest_difficulty echo, so latch
+                         // the highest value it advertises (its real minimum).
                          window.currentPoolDifficulty = d;
-                         if (d > poolSubmitFloor) poolSubmitFloor = d;
+                         if (poolLatchHighestDifficulty) {
+                             if (d > poolSubmitFloor) poolSubmitFloor = d;
+                         } else {
+                             poolSubmitFloor = d;
+                         }
                          logLine('Pool set share difficulty to ' + d + '.' +
                              (poolSubmitFloor > d ? ' Minimum accepted is ' + poolSubmitFloor + '.' : ''), 'info');
                          elements.shareDiff.textContent = formatDifficulty(poolSubmitFloor) + ' min';
                          elements.shareDiff.title = 'Minimum share difficulty the pool will accept. A found hash must reach this target; the pool rejects anything lower as "Above target", so the miner does not send it.';
+                         // Search at the pool's advertised difficulty; the submit
+                         // floor above is what actually gates submissions.
                          broadcastToWorkers({ cmd: 'difficulty', difficulty: d });
                          if (gpu) prepareGpuContext();
+                         // Solo only: now that we have seen ckpool's own minimum,
+                         // ask for the lowest *search* difficulty so a browser (a few
+                         // MH/s at best) still finds candidate shares to display.
+                         // Those candidates are never submitted unless they clear the
+                         // latched floor, so this cannot cause "Above target" rejects.
+                         if (poolLatchHighestDifficulty && !suggestedDifficulty) {
+                             suggestedDifficulty = true;
+                             try {
+                                 stratumWs.send(JSON.stringify({ id: 3, method: "mining.suggest_difficulty", params: [1] }));
+                             } catch (e) {}
+                         }
                     }
                 };
 

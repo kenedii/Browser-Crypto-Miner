@@ -12,11 +12,11 @@ The miner exposes three modes, all of which submit real pool work:
 
 The mode is passed to the bridge as a query parameter (e.g. `wss://stratum.tensors.vip/?coin=BTC&mode=solo`); see `stratum-bridge/README.md` for the routing and safety details.
 
-After authorizing, the miner sends `mining.suggest_difficulty` (1) so the pool grants the lowest *share* difficulty it will allow. ckpool (solo) honours this and drops to difficulty 1 - which is what makes browser shares possible; btcpowlab ignores it and keeps its fixed difficulty.
+After authorizing, the miner adapts to each pool's *share* difficulty. On a vardiff pool (btcpowlab, custom) the pool's **current** advertised difficulty is the live bar it must clear, so the miner submits shares at exactly that difficulty - the pool ramps it down to a browser's speed and the shares get credited. ckpool (solo) is different: it always enforces its own minimum (10,000 for solo), and `mining.suggest_difficulty` (1) only lowers the difficulty ckpool *reports for searching*. The miner therefore still sends the suggestion in solo mode (so the UI can show candidate shares), but it latches ckpool's own minimum as its **submit floor** and never sends a share below it - submitting below it just yields `Above target` rejections.
 
 ### Two different difficulties (the important part)
 
-- **Share difficulty** (the `1` above) is only the bar at which the pool *credits* a share. It decides how often a browser gets feedback; it does **not** decide whether a block is valid, and it does not change what the rest of the network accepts.
+- **Share difficulty** (the value the pool advertises) is only the bar at which the pool *credits* a share. It decides how often a browser gets feedback; it does **not** decide whether a block is valid, and it does not change what the rest of the network accepts.
 - **Network difficulty** (shown live as *Network Difficulty*) is the real Bitcoin difficulty, decoded from each job's block header `nBits`. A block is valid only when a hash meets that target.
 
 The miner **never broadcasts a block**. It only submits shares over Stratum to the pool. The pool (ckpool) independently checks every share against the **real network target** and broadcasts a block only when one meets it - so asking for share difficulty 1 can never make the network reject anything. The **Best Share** panel shows the rarest hash the browser has produced (as a difficulty), so you can see how far it is from a block.
