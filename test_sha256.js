@@ -184,6 +184,22 @@ for (let i = 0; i < 500; i++) {
 }
 hdOk ? ok('hashDifficulty == diff-1 target / displayed-hash value') : null;
 
+// wordsLessThan must order digests exactly like hashDifficulty (a rarer hash has
+// a smaller displayed value and a higher difficulty); the worker uses it to keep
+// the rarest hash it has seen for the "Best Share" tile.
+let ltOk = true;
+for (let i = 0; i < 1000; i++) {
+    const wa = SC.hashNonce(ctx, (Math.random() * 0xffffffff) >>> 0, s).slice();
+    const wb = SC.hashNonce(ctx, (Math.random() * 0xffffffff) >>> 0, s).slice();
+    const gotLess = SC.wordsLessThan(wa, wb);
+    const gotGreater = SC.wordsLessThan(wb, wa);
+    const da = SC.hashDifficulty(wa), db = SC.hashDifficulty(wb);
+    if (da === db) continue; // identical difficulty (distinct nonces): astronomically rare, skip
+    const expectLess = da > db;
+    if (gotLess !== expectLess || gotLess === gotGreater) { ltOk = false; fail('wordsLessThan disagrees with hashDifficulty'); break; }
+}
+ltOk ? ok('wordsLessThan orders digests like hashDifficulty (rarest first)') : null;
+
 // A share target is a low bar; the real network target is far stricter. Random
 // hashes should fail the network target (i.e. share != block).
 const netWords = SC.nbitsToTargetWords(0x17021ef0);

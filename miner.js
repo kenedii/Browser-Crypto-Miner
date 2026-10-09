@@ -53,6 +53,15 @@ function runMinerApp() {
     let poolSubmitFloor = 0;
     let poolLatchHighestDifficulty = false; // true in solo mode; set per connection
 
+    // The difficulty every engine *searches* at: deliberately the lowest (easiest)
+    // Bitcoin pool difficulty. A hash that clears a harder pool target also clears
+    // difficulty 1, so searching here never misses a share the pool would accept -
+    // it just means we examine (and can display) many more hashes, keeping the
+    // "Best Share" tile live even while the pool is still ramping its own, harder
+    // difficulty down to a browser's speed. What we actually *submit* stays gated
+    // by poolSubmitFloor (the pool's advertised difficulty).
+    const SEARCH_DIFFICULTY = 1;
+
     // Clear loading message and inject UI
     container.innerHTML = '';
     container.innerHTML = `
@@ -169,9 +178,9 @@ function runMinerApp() {
               <br><br>
               <strong>Solo &mdash; default:</strong> your wallet address is the payout address &mdash; if a share you submit solves a block, the full block reward is paid to you. Be aware that <strong>solo.ckpool.org enforces a minimum share difficulty of 10,000</strong>: a browser cannot realistically reach that, so this page normally just tracks your best local share and submits nothing. A browser finding a full block is effectively impossible (roughly one chance in hundreds of millions of years of nonstop mining) &mdash; treat this as an honest lottery, not a reliable miner.
               <br><br>
-              <strong>Three numbers, not one:</strong> the <em>Network Difficulty</em> panel is the real, live Bitcoin difficulty, read straight from each job's header &mdash; a block needs a hash at or below that target, and only the <strong>pool</strong> (ckpool) detects and broadcasts it (this page never broadcasts anything). <em>Share Difficulty</em> shown as &ldquo;&hellip; min&rdquo; is the lowest difficulty the pool will <em>credit</em>; anything easier is rejected as &ldquo;Above target&rdquo;, so the miner simply does not send it. <em>Best Share</em> is the rarest hash you have found so far, even when it is still below the pool's minimum.
+              <strong>Three numbers, not one:</strong> the <em>Network Difficulty</em> panel is the real, live Bitcoin difficulty, read straight from each job's header &mdash; a block needs a hash at or below that target, and only the <strong>pool</strong> (ckpool) detects and broadcasts it (this page never broadcasts anything). <em>Share Difficulty</em> shown as &ldquo;&hellip; min&rdquo; is the lowest difficulty the pool will <em>credit</em>; anything easier is rejected as &ldquo;Above target&rdquo;, so the miner simply does not send it. The engines always <em>search</em> at difficulty 1 (the easiest target) instead of the pool's higher starting difficulty, so they never waste time and <em>Best Share</em> keeps moving; any hash the pool accepts is submitted the moment it does. <em>Best Share</em> is the rarest hash you have found so far, even when it is still below the pool's minimum.
               <br><br>
-              <strong>Shared Pool (btcpowlab):</strong> your work joins the open btcpowlab hybrid pool. No account is required &mdash; your wallet address is credited automatically. Eligible earnings use a hybrid allocation (85% to the block finder, 10% to other recent miners, 5% to operation).
+              <strong>Shared Pool (btcpowlab):</strong> your work joins the open btcpowlab hybrid pool. No account is required &mdash; your wallet address is credited automatically. Eligible earnings use a hybrid allocation (85% to the block finder, 10% to other recent miners, 5% to operation). btcpowlab starts every miner at a high difficulty (1024) and ignores <code>suggest_difficulty</code>, so it can take a few minutes of vardiff to ramp down to 1 &mdash; until then found hashes show as your <em>Best Share</em> but are not credited.
               <br><br>
               <strong>Custom Pool:</strong> enter your own pool's host, port and worker login &mdash; your hashes are credited to that pool/account.
               <br><br>
@@ -644,9 +653,13 @@ function runMinerApp() {
                         elements.networkStatus.style.color = "#3ddc84";
                         logLine('Authorized as "' + getSubmitUser() + '" - mining to ' + getPoolLabel() + '.', 'ok');
                         startKeepalive();
-                        // In solo mode we ask for a low *search* difficulty, but
-                        // only once the pool has told us its own minimum - see the
-                        // set_difficulty handler below.
+                        // Ask the pool for the lowest share difficulty. On a vardiff
+                        // pool this is best-effort - btcpowlab ignores it and ramps
+                        // its own difficulty down instead - but a pool that honours
+                        // it starts crediting at difficulty 1 immediately. Solo
+                        // (ckpool) is handled after its first set_difficulty so we
+                        // only ever ask once we know ckpool's real minimum.
+                        if (!poolLatchHighestDifficulty) sendSuggestDifficulty();
                         resolve(true);
                     }
 
@@ -727,9 +740,11 @@ function runMinerApp() {
                              (poolSubmitFloor > d ? ' Minimum accepted is ' + poolSubmitFloor + '.' : ''), 'info');
                          elements.shareDiff.textContent = formatDifficulty(poolSubmitFloor) + ' min';
                          elements.shareDiff.title = 'Minimum share difficulty the pool will accept. A found hash must reach this target; the pool rejects anything lower as "Above target", so the miner does not send it.';
-                         // Search at the pool's advertised difficulty; the submit
-                         // floor above is what actually gates submissions.
-                         broadcastToWorkers({ cmd: 'difficulty', difficulty: d });
+                         // Engines always search at difficulty 1 (see
+                         // SEARCH_DIFFICULTY); the submit floor above is what
+                         // actually gates submissions, so a harder advertised
+                         // difficulty never slows the search down.
+                         broadcastToWorkers({ cmd: 'difficulty', difficulty: SEARCH_DIFFICULTY });
                          if (gpu) prepareGpuContext();
                          // Solo only: now that we have seen ckpool's own minimum,
                          // ask for the lowest *search* difficulty so a browser (a few
@@ -737,10 +752,7 @@ function runMinerApp() {
                          // Those candidates are never submitted unless they clear the
                          // latched floor, so this cannot cause "Above target" rejects.
                          if (poolLatchHighestDifficulty && !suggestedDifficulty) {
-                             suggestedDifficulty = true;
-                             try {
-                                 stratumWs.send(JSON.stringify({ id: 3, method: "mining.suggest_difficulty", params: [1] }));
-                             } catch (e) {}
+                             sendSuggestDifficulty();
                          }
                     }
                 };
@@ -836,6 +848,10 @@ function runMinerApp() {
         const w = new Worker('miner-worker.js');
         w.onmessage = (e) => {
             if (e.data.hashes) totalHashes += e.data.hashes;
+            // Rarest hash this worker has found so far (sub-target hashes too) ->
+            // drives the "Best Share" tile. It is not submitted unless it also
+            // clears the pool's advertised difficulty (see offerShare).
+            if (e.data.best) updateBestShare(e.data.best.difficulty);
             if (e.data.share) offerShare(e.data.job_id, e.data.en2, e.data.ntime, e.data.nonce, e.data.difficulty);
         };
         w.onerror = (err) => { console.error('Mining worker error', err); };
@@ -903,6 +919,17 @@ function runMinerApp() {
         workers.forEach((w) => { try { w.postMessage(msg); } catch (e) {} });
     }
 
+    // Ask the pool for the lowest (difficulty 1) share difficulty, once per
+    // connection. Harmless if the pool ignores it - what we submit is still gated
+    // by poolSubmitFloor.
+    function sendSuggestDifficulty() {
+        if (suggestedDifficulty || !stratumWs || stratumWs.readyState !== 1) return;
+        suggestedDifficulty = true;
+        try {
+            stratumWs.send(JSON.stringify({ id: 3, method: "mining.suggest_difficulty", params: [SEARCH_DIFFICULTY] }));
+        } catch (e) {}
+    }
+
     function startCpuMining() {
         // clear old workers
         workers.forEach(w => w.terminate());
@@ -919,9 +946,8 @@ function runMinerApp() {
                     extranonce2Size: window.stratumExtranonce2Size || 4
                 });
             }
-            if (window.currentPoolDifficulty) {
-                w.postMessage({ cmd: 'difficulty', difficulty: window.currentPoolDifficulty });
-            }
+            // Every worker searches at difficulty 1 (see SEARCH_DIFFICULTY).
+            w.postMessage({ cmd: 'difficulty', difficulty: SEARCH_DIFFICULTY });
             w.postMessage({ cmd: 'start' });
             workers.push(w);
         }
@@ -972,7 +998,7 @@ function runMinerApp() {
         if (!gpu || !window.currentStratumJob) return false;
         const ctx = SHA256Crypto.buildJobContext(
             window.currentStratumJob, window.stratumExtranonce1 || '', gpu.en2,
-            window.currentPoolDifficulty || 1);
+            SEARCH_DIFFICULTY);
         gpu.ctx = ctx;
         device.queue.writeBuffer(gpu.uniform, 0, ctx.midstate);   // midstate -> bytes 0..31
         device.queue.writeBuffer(gpu.uniform, 32, ctx.target);    // target   -> bytes 32..63

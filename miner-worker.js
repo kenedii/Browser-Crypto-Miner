@@ -19,6 +19,9 @@ var difficulty = 1;
 var ctx = null;
 var nonce = 0;
 var scratch = SC.makeScratch();
+var bestWords = null;   // rarest digest seen (drives the page's "Best Share" tile)
+var bestNonce = 0;
+var bestDirty = false;
 
 var BATCH = 40000;
 
@@ -69,13 +72,35 @@ function loop() {
         nonce = (nonce + 1) >>> 0;
         if (nonce === 0) rollExtranonce2();
         var words = SC.hashNonce(ctx, nonce, scratch);
+        // Track the rarest hash seen so the page's "Best Share" tile reflects the
+        // best hash found so far, including sub-difficulty-1 hashes (this is the
+        // value the pool would compare; it is only a *share* if it also meets
+        // ctx.target, which is handled below).
+        if (!bestWords) {
+            bestWords = new Uint32Array(8);
+            bestWords.set(words);
+            bestNonce = nonce;
+            bestDirty = true;
+        } else if (SC.wordsLessThan(words, bestWords)) {
+            bestWords.set(words);
+            bestNonce = nonce;
+            bestDirty = true;
+        }
         if (SC.wordsMeetTarget(words, ctx.target)) {
             // Re-verify on the obvious path so a bug can never submit junk.
             if (SC.nonceIsValid(ctx, nonce)) { found = nonce; break; }
         }
     }
 
-    self.postMessage({ hashes: i });
+    var stats = { hashes: i };
+    if (bestDirty) {
+        bestDirty = false;
+        stats.best = {
+            difficulty: SC.hashDifficulty(bestWords),
+            nonce: (bestNonce >>> 0).toString(16).padStart(8, '0')
+        };
+    }
+    self.postMessage(stats);
     if (found >= 0) {
         self.postMessage({
             share: true,

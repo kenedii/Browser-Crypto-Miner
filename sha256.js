@@ -282,6 +282,20 @@
         return true;
     }
 
+    // True when digest `a` is a rarer hash than digest `b` (both are the eight
+    // big-endian digest words returned by hashNonce). Compares the displayed
+    // block values word by word, so it exits at the first differing word - cheap
+    // enough to run on every hash to track the rarest one seen so far.
+    function wordsLessThan(a, b) {
+        for (var i = 0; i < 8; i++) {
+            var av = bswap32(a[7 - i]);
+            var bv = bswap32(b[7 - i]);
+            if (av < bv) return true;
+            if (av > bv) return false;
+        }
+        return false;
+    }
+
     function bytesMeetTarget(hash32, targetWords) {
         for (var i = 0; i < 8; i++) {
             // The displayed hash reverses the digest bytes; byte-swap so the
@@ -333,6 +347,7 @@
         makeScratch: makeScratch,
         hashNonce: hashNonce,
         wordsMeetTarget: wordsMeetTarget,
+        wordsLessThan: wordsLessThan,
         bytesMeetTarget: bytesMeetTarget,
         headerForNonce: headerForNonce,
         nonceIsValid: nonceIsValid,
