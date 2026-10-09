@@ -708,14 +708,14 @@ function runMinerApp() {
                             w.postMessage({
                                 cmd: 'job', job: window.currentStratumJob,
                                 extranonce1: window.stratumExtranonce1,
-                                en2: randHex((window.stratumExtranonce2Size || 4) * 2),
+                                en2: randHex(window.stratumExtranonce2Size || 4),
                                 extranonce2Size: window.stratumExtranonce2Size || 4
                             });
                         });
 
                         // GPU: rebuild the midstate/target uniform for a fresh extranonce2.
                         if (gpu) {
-                            gpu.en2 = randHex((window.stratumExtranonce2Size || 4) * 2);
+                            gpu.en2 = randHex(window.stratumExtranonce2Size || 4);
                             gpu.baseNonce = (Math.random() * 0xffffffff) >>> 0;
                             prepareGpuContext();
                         }
@@ -858,7 +858,10 @@ function runMinerApp() {
         return w;
     }
 
-    // Format `bytes` random bytes as hex (used for extranonce2).
+    // Format `bytes` random bytes as hex (used for extranonce2). The argument is a
+    // BYTE count: it returns bytes*2 hex characters. Callers pass the pool's
+    // advertised extranonce2 size in bytes (4 on btcpowlab, 8 on solo ckpool) and
+    // must NOT pre-multiply by 2 - the pool rejects a wrong-length extranonce2.
     function randHex(bytes) {
         let s = '';
         for (let i = 0; i < bytes * 2; i++) s += Math.floor(Math.random() * 16).toString(16);
@@ -942,7 +945,7 @@ function runMinerApp() {
                 w.postMessage({
                     cmd: 'job', job: window.currentStratumJob,
                     extranonce1: window.stratumExtranonce1,
-                    en2: randHex((window.stratumExtranonce2Size || 4) * 2),
+                    en2: randHex(window.stratumExtranonce2Size || 4),
                     extranonce2Size: window.stratumExtranonce2Size || 4
                 });
             }
@@ -1007,7 +1010,7 @@ function runMinerApp() {
 
     async function startGpuMining() {
         await setupGpuCompute();
-        gpu.en2 = randHex((window.stratumExtranonce2Size || 4) * 2);
+        gpu.en2 = randHex(window.stratumExtranonce2Size || 4);
         gpu.baseNonce = (Math.random() * 0xffffffff) >>> 0;
         prepareGpuContext();
         if (!gpu.frame) runGpuLoop();
@@ -1027,7 +1030,7 @@ function runMinerApp() {
             // space is exhausted.
             if (gpu.baseNonce > 0xffffffff - span) {
                 gpu.baseNonce = (Math.random() * 0xffffffff) >>> 0;
-                gpu.en2 = randHex((window.stratumExtranonce2Size || 4) * 2);
+                gpu.en2 = randHex(window.stratumExtranonce2Size || 4);
                 prepareGpuContext();
             }
 

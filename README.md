@@ -21,6 +21,11 @@ After authorizing, the miner adapts to each pool's *share* difficulty. Its engin
 
 The miner **never broadcasts a block**. It only submits shares over Stratum to the pool. The pool (ckpool) independently checks every share against the **real network target** and broadcasts a block only when one meets it - so asking for share difficulty 1 can never make the network reject anything. The **Best Share** panel shows the rarest hash the browser has produced (as a difficulty), so you can see how far it is from a block.
 
+### Extranonce2 length (why shares were once rejected)
+
+Every job the miner searches uses a fresh random **extranonce2**. Its length must equal the size the pool advertised in `mining.subscribe` - exactly **4 bytes** (8 hex characters) on btcpowlab, **8 bytes** on solo ckpool. `randHex(bytes)` already emits `bytes*2` hex characters, so the miner passes the pool's byte count straight through. Pre-multiplying it by 2 (as an earlier revision did) produced a double-length extranonce2 that btcpowlab rejects outright with `[20, "extranonce2 must contain exactly 4 bytes"]` - so every share was refused at the pool. Guarded by `test_en2_size.js` (source/contract) and `stratum-bridge/test_en2_size.js` (wire-level: a strict mock pool accepts the correct length and rejects the doubled one).
+
+
 ## Mining Engines
 
 Pick one under **Mining Device**:
@@ -40,6 +45,7 @@ All engines share `sha256.js` (identical job/merkle/header math) and every found
 - `stratum-bridge/`: Node.js WebSocket ⇄ Stratum TCP bridge for Bitcoin, including the dev-fee cycle.
 - `Dockerfile`: Multi-stage build that minifies the frontend assets and serves them with Nginx.
 - `test_sha256.js`: Offline unit test for `sha256.js` (SHA-256 vs Node crypto, prevhash transform vs a real tip, optimized path vs the obvious path).
+- `test_en2_size.js`: Regression test that the miner always submits an extranonce2 of exactly the length the pool advertised (`randHex(bytes)`, never `bytes*2`).
 
 ---
 

@@ -63,6 +63,7 @@ Tests
 
 - `node test_modes.js` - verifies mode routing (solo/pplns reach the configured upstream; custom rejects blocked hosts and disallowed ports). Local mock only.
 - `node test_share_e2e.js` - runs the bridge against a mock pool that hands out a **real** captured Bitcoin job at a low difficulty and then **independently verifies** the submitted share (Node crypto + real block-header byte order). Proves the whole job -> hash -> submit pipeline, including the stratum prevhash transform and the `<address>.browser` login.
+- `node test_en2_size.js` - wire-level regression for the extranonce2 length bug: a strict mock pool (like btcpowlab) advertises a 4-byte extranonce2 and rejects any wrong-sized `en2` with `[20, "extranonce2 must contain exactly 4 bytes"]`. Two clients submit a real share through the bridge - the correct 4-byte `en2` is **accepted**, the doubled 8-byte one is **rejected**.
 - `node test_local.js` - starts a stub Bitcoin stratum server and verifies the bridge relays messages end-to-end. The stub is a local mock only; it performs no real network mining.
 - `node test_local_btc.js` - a quick subscribe check against a bridge running on `localhost:8080`.
 - `node test_live_mining.js` - **performs real network work**: connects to `wss://stratum.tensors.vip` in solo and pplns modes, negotiates difficulty and mines the real jobs for ~20s each.
