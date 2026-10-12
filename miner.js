@@ -216,6 +216,8 @@ function runMinerApp() {
       coin: document.getElementById("coin"),
       mode: document.getElementById("mode"),
       address: document.getElementById("address"),
+      consoleLog: document.getElementById("console-log"),
+      consoleClear: document.getElementById("console-clear"),
       device: document.getElementById("device"),
       startBtn: document.getElementById("start-btn"),
       stopBtn: document.getElementById("stop-btn"),
