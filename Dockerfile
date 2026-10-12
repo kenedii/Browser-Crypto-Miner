@@ -1,20 +1,23 @@
 # Stage 1: build the frontend assets (de-comment / minify, no obfuscation)
 FROM node:20-alpine AS build
 WORKDIR /build
-COPY mine-crypto.html miner.js sha256.js miner-worker.js ./
+# randomx.wasm* is optional (gitignored build artefact of WebRandomX/): the glob
+# lets the image build without it, in which case Monero reports the VM as missing.
+COPY mine-crypto.html miner.js sha256.js scrypt.js randomx.js miner-worker.js scrypt-worker.js xmr-worker.js randomx.wasm* ./
 # Strip comments and collapse whitespace with terser; no identifier mangling.
-RUN npx --yes terser@5 miner.js -c -o miner.min.js && mv miner.min.js miner.js \
- && npx --yes terser@5 sha256.js -c -o sha256.min.js && mv sha256.min.js sha256.js \
- && npx --yes terser@5 miner-worker.js -c -o miner-worker.min.js && mv miner-worker.min.js miner-worker.js
+RUN for f in miner sha256 scrypt randomx miner-worker scrypt-worker xmr-worker; do \
+      npx --yes terser@5 $f.js -c -o $f.min.js && mv $f.min.js $f.js; \
+    done
+# Collect exactly the files the site serves (plus randomx.wasm when it exists).
+RUN mkdir -p dist && cp mine-crypto.html dist/index.html && cp *.js dist/ && \
+    ( cp randomx.wasm dist/ 2>/dev/null || \
+      echo 'randomx.wasm not built - Monero mining will report it as missing' )
 
 # Stage 2: serve the static frontend only. All mining traffic goes straight to
 # the WebSocket stratum bridge on the VPS, so this container never proxies,
 # computes or holds long-lived connections - it just serves a few cacheable files.
 FROM nginx:alpine
-COPY --from=build /build/mine-crypto.html /usr/share/nginx/html/index.html
-COPY --from=build /build/miner.js /usr/share/nginx/html/miner.js
-COPY --from=build /build/sha256.js /usr/share/nginx/html/sha256.js
-COPY --from=build /build/miner-worker.js /usr/share/nginx/html/miner-worker.js
+COPY --from=build /build/dist/ /usr/share/nginx/html/
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 
 # Nginx serves on port 80; deploy to Cloud Run with --port 80.

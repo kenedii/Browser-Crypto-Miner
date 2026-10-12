@@ -4,3 +4,14 @@ npm-debug.log*
 .env
 .DS_Store
 Thumbs.db
+
+# Monero/RandomX WebAssembly VM: an untracked build artefact of WebRandomX/.
+# The Dockerfile copies WebRandomX/randomx.wasm into the image when it exists and
+# still builds without it (the XMR worker then reports the missing module), and
+# crypto-frontend/randomx.wasm is only the copy a local static server hands out.
+randomx.wasm
+
+# WebRandomX build tree and cloned RandomX checkout (nested git repo)
+WebRandomX/build/
+WebRandomX/randomx/
+WebRandomX/randomx-*/

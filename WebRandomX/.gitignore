@@ -1,0 +1,7 @@
+# Build artefacts of WebRandomX/ - never commit these; the Dockerfile tolerates
+# their absence (the Monero worker then reports the missing VM), and the frontend
+# image copies randomx.wasm into the served dist/ when it has been built.
+randomx.wasm
+WebRandomX/build/
+WebRandomX/randomx/
+WebRandomX/randomx-*/

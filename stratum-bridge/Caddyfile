@@ -1,6 +1,7 @@
-# Caddy reverse proxy for the BTC stratum bridge.
+# Caddy reverse proxy for the multi-coin stratum bridge (BTC / LTC / DOGE / XMR).
 # Caddy terminates TLS automatically (Let's Encrypt) and proxies the
-# WebSocket upgrade to the node bridge container.
+# WebSocket upgrade to the node bridge container. The coin is chosen per client
+# with the ?coin= query string, so one hostname serves every chain.
 stratum.tensors.vip {
     reverse_proxy bridge:8080
 }

@@ -4,6 +4,7 @@ services:
     restart: unless-stopped
     environment:
       - PORT=8080
+      # ---- Bitcoin (double-SHA-256d) --------------------------------------
       # Solo pool (miner keeps the full block reward if they solve a block)
       - BTC_POOL_HOST=solo.ckpool.org
       - BTC_POOL_PORT=3333
@@ -11,9 +12,36 @@ services:
       # Override these to point at your own pool backend.
       - PPLNS_POOL_HOST=stratum.btcpowlab-pool.com
       - PPLNS_POOL_PORT=3333
+      # ---- Litecoin / Dogecoin (Scrypt) -----------------------------------
+      # Same stratum dialect as Bitcoin, different PoW. viabtc (LTC) and zpool.ca
+      # (DOGE) credit the bare address, so the miner's own wallet is the payout
+      # address in every mode. (doge.viabtc.io stopped resolving in 2026.)
+      - LTC_POOL_HOST=ltc.viabtc.io
+      - LTC_POOL_PORT=3333
+      - LTC_PPLNS_POOL_HOST=ltc.viabtc.io
+      - LTC_PPLNS_POOL_PORT=3333
+      - DOGE_POOL_HOST=doge.mine.zpool.ca
+      - DOGE_POOL_PORT=3333
+      - DOGE_PPLNS_POOL_HOST=doge.mine.zpool.ca
+      - DOGE_PPLNS_POOL_PORT=3333
+      # ---- Merged mining (LTC + DOGE, auxpow) ------------------------------
+      # mode=merged routes both scrypt coins here: the pool puts a Dogecoin
+      # block inside the Litecoin blocks found for the session, so one scrypt
+      # session is credited on both chains. f2pool is the default because its
+      # Litecoin page quotes revenue as "LTC + DOGE" per GH/s; the login is the
+      # pool worker (a bare LTC address was accepted live).
+      - MERGED_POOL_HOST=ltc.f2pool.com
+      - MERGED_POOL_PORT=8888
+      # ---- Monero (RandomX) -----------------------------------------------
+      # xmrig "login / job / submit" protocol. A browser CPU is far too slow to
+      # beat a pool's minimum share difficulty on Monero; treat it as a lottery.
+      - XMR_POOL_HOST=pool.supportxmr.com
+      - XMR_POOL_PORT=3333
+      - XMR_PPLNS_POOL_HOST=pool.supportxmr.com
+      - XMR_PPLNS_POOL_PORT=3333
       # Custom-pool routing (set ALLOW_CUSTOM_POOLS=0 to disable entirely)
       - ALLOW_CUSTOM_POOLS=1
-      - CUSTOM_POOL_PORTS=3333,3334,3335,3336,443,4443,4444,8332,8111,9332,9333,8888,14333
+      - CUSTOM_POOL_PORTS=3333,3334,3335,3336,443,4443,4444,5555,7777,8080,8332,8111,8888,9000,9332,9333,10001,14333,18081
     expose:
       - "8080"
 

@@ -1,0 +1,177 @@
+diff --git a/src/instructions_portable.cpp b/src/instructions_portable.cpp
+index d746727..06f1af4 100644
+--- a/src/instructions_portable.cpp
++++ b/src/instructions_portable.cpp
+@@ -32,6 +32,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ #include "intrin_portable.h"
+ #include "blake2/endian.h"
+ 
++#if defined(__wasm__)
++#include "../../src/randomx_wasm_fp.hpp"
++#endif
++
+ #if defined(__SIZEOF_INT128__)
+ 	typedef unsigned __int128 uint128_t;
+ 	typedef __int128 int128_t;
+@@ -134,11 +138,22 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ #ifdef RANDOMX_DEFAULT_FENV
+ 
+ void rx_reset_float_state() {
++#if defined(__wasm__)
++	/* wasm rounds every f64 operation to nearest and has no notion of a rounding
++	 * mode, so the mode RandomX's CFROUND selects is kept in software here; see
++	 * ../../src/randomx_wasm_fp.hpp. */
++	rx_wasm_fp::reset_float_state();
++#else
+ 	setRoundMode_(FE_TONEAREST);
+ 	rx_set_double_precision(); //set precision to 53 bits if needed by the platform
++#endif
+ }
+ 
+ void rx_set_rounding_mode(uint32_t mode) {
++#if defined(__wasm__)
++	rx_wasm_fp::set_rounding_mode(mode);
++	return;
++#endif
+ 	switch (mode & 3) {
+ 	case RoundDown:
+ 		setRoundMode_(FE_DOWNWARD);
+@@ -158,6 +173,9 @@ void rx_set_rounding_mode(uint32_t mode) {
+ }
+ 
+ uint32_t rx_get_rounding_mode() {
++#if defined(__wasm__)
++	return rx_wasm_fp::get_rounding_mode();
++#else
+ 	switch (fegetround()) {
+ 	case FE_DOWNWARD:
+ 		return RoundDown;
+@@ -170,6 +188,7 @@ uint32_t rx_get_rounding_mode() {
+ 	default:
+ 		UNREACHABLE;
+ 	}
++#endif
+ }
+ 
+ #endif
+diff --git a/src/intrin_portable.h b/src/intrin_portable.h
+index 50020c3..f374840 100644
+--- a/src/intrin_portable.h
++++ b/src/intrin_portable.h
+@@ -524,6 +524,12 @@ FORCE_INLINE rx_vec_f128 rx_cvt_packed_int_vec_f128(const void* addr) {
+ #include <cstdlib>
+ #include <cmath>
+ 
++#if defined(__wasm__)
++/* WebAssembly has no rounding-mode control at all, which RandomX's CFROUND
++ * instruction requires; see ../../src/randomx_wasm_fp.hpp. */
++#include "../../src/randomx_wasm_fp.hpp"
++#endif
++
+ typedef union {
+ 	uint64_t u64[2];
+ 	uint32_t u32[4];
+@@ -565,36 +571,61 @@ FORCE_INLINE rx_vec_f128 rx_swap_vec_f128(rx_vec_f128 a) {
+ 
+ FORCE_INLINE rx_vec_f128 rx_add_vec_f128(rx_vec_f128 a, rx_vec_f128 b) {
+ 	rx_vec_f128 x;
++#if defined(__wasm__)
++	x.lo = rx_wasm_fp::fadd(a.lo, b.lo);
++	x.hi = rx_wasm_fp::fadd(a.hi, b.hi);
++#else
+ 	x.lo = a.lo + b.lo;
+ 	x.hi = a.hi + b.hi;
++#endif
+ 	return x;
+ }
+ 
+ FORCE_INLINE rx_vec_f128 rx_sub_vec_f128(rx_vec_f128 a, rx_vec_f128 b) {
+ 	rx_vec_f128 x;
++#if defined(__wasm__)
++	x.lo = rx_wasm_fp::fsub(a.lo, b.lo);
++	x.hi = rx_wasm_fp::fsub(a.hi, b.hi);
++#else
+ 	x.lo = a.lo - b.lo;
+ 	x.hi = a.hi - b.hi;
++#endif
+ 	return x;
+ }
+ 
+ FORCE_INLINE rx_vec_f128 rx_mul_vec_f128(rx_vec_f128 a, rx_vec_f128 b) {
+ 	rx_vec_f128 x;
++#if defined(__wasm__)
++	x.lo = rx_wasm_fp::fmul(a.lo, b.lo);
++	x.hi = rx_wasm_fp::fmul(a.hi, b.hi);
++#else
+ 	x.lo = a.lo * b.lo;
+ 	x.hi = a.hi * b.hi;
++#endif
+ 	return x;
+ }
+ 
+ FORCE_INLINE rx_vec_f128 rx_div_vec_f128(rx_vec_f128 a, rx_vec_f128 b) {
+ 	rx_vec_f128 x;
++#if defined(__wasm__)
++	x.lo = rx_wasm_fp::fdiv(a.lo, b.lo);
++	x.hi = rx_wasm_fp::fdiv(a.hi, b.hi);
++#else
+ 	x.lo = a.lo / b.lo;
+ 	x.hi = a.hi / b.hi;
++#endif
+ 	return x;
+ }
+ 
+ FORCE_INLINE rx_vec_f128 rx_sqrt_vec_f128(rx_vec_f128 a) {
+ 	rx_vec_f128 x;
++#if defined(__wasm__)
++	x.lo = rx_wasm_fp::fsqrt(a.lo);
++	x.hi = rx_wasm_fp::fsqrt(a.hi);
++#else
+ 	x.lo = rx_sqrt(a.lo);
+ 	x.hi = rx_sqrt(a.hi);
++#endif
+ 	return x;
+ }
+ 
+diff --git a/src/randomx.cpp b/src/randomx.cpp
+index a08968e..82a7954 100644
+--- a/src/randomx.cpp
++++ b/src/randomx.cpp
+@@ -34,6 +34,10 @@ OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ #include "vm_compiled_light.hpp"
+ #include "blake2/blake2.h"
+ #include "cpu.hpp"
++
++#if defined(__wasm__)
++#include "../../src/randomx_wasm_fp.hpp"
++#endif
+ #include <cassert>
+ #include <limits>
+ 
+@@ -365,9 +369,13 @@ extern "C" {
+ 
+ #ifdef USE_CSR_INTRINSICS
+ 		const unsigned int fpstate = _mm_getcsr();
++#else
++#if defined(__wasm__)
++		const uint32_t fpstate = rx_wasm_fp::get_rounding_mode();
+ #else
+ 		fenv_t fpstate;
+ 		fegetenv(&fpstate);
++#endif
+ #endif
+ 
+ 		alignas(16) uint64_t tempHash[8];
+@@ -385,8 +393,12 @@ extern "C" {
+ 
+ #ifdef USE_CSR_INTRINSICS
+ 		_mm_setcsr(fpstate);
++#else
++#if defined(__wasm__)
++		rx_wasm_fp::set_rounding_mode(fpstate);
+ #else
+ 		fesetenv(&fpstate);
++#endif
+ #endif
+ 	}
+ 

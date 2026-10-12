@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Browser Bitcoin Miner</title>
+    <title>Browser Crypto Miner - BTC, LTC, DOGE, XMR</title>
     <style>
         * {
             margin: 0;
@@ -51,7 +51,14 @@
         <h2>Loading Mining Interface...</h2>
     </div>
 
+    <!-- Proof-of-work maths, one file per algorithm family. miner.js needs the
+         BTC double-SHA-256 helpers (tile math + the WebGPU kernel) and the
+         RandomX protocol/C ABI seam (window.XmrCrypto) in the page; scrypt.js is
+         only ever importScripts'ed inside scrypt-worker.js, so it is not loaded
+         here. randomx.wasm itself is fetched by xmr-worker.js on demand - if it
+         is missing the Monero worker reports that and mines nothing. -->
     <script src="sha256.js"></script>
+    <script src="randomx.js"></script>
 
     <script src="miner.js"></script>
 </body>

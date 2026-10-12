@@ -1,0 +1,7 @@
+.git
+.gitignore
+node_modules/
+stratum-bridge/
+WebRandomX/
+test_*.js
+*.md

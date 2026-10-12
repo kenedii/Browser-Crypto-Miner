@@ -38,8 +38,15 @@ function runMinerApp() {
     let bindGroup = null;
     const GPU_MAX_FOUND = 64;
 
-  // Bridge config - public WebSocket stratum bridge
-  const BRIDGE_URL = "wss://stratum.tensors.vip";
+  // Bridge config - public WebSocket stratum bridge. A ?bridge= query parameter
+  // overrides it for that page load only, so the page can be pointed at a locally
+  // running stratum-bridge (mine-crypto.html?bridge=ws://localhost:8080) without
+  // editing this file or touching the deployed configuration.
+  const BRIDGE_URL = (function () {
+      const override = new URLSearchParams(location.search).get('bridge');
+      if (!override) return "wss://stratum.tensors.vip";
+      return /^wss?:\/\//i.test(override) ? override : 'ws://' + override;
+  })();
     let stratumWs = null;
     let suggestedDifficulty = false;
     // The pool's minimum share difficulty: the bar a found hash must clear to be
@@ -71,7 +78,10 @@ function runMinerApp() {
         <div class="form-group" style="margin-bottom: 20px;">
           <label for="coin" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Crypto / Pool</label>
           <select id="coin" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-            <option value="BTC" selected>Bitcoin (BTC)</option>
+            <option value="BTC" selected>Bitcoin (BTC) - SHA-256d</option>
+            <option value="LTC">Litecoin (LTC) - Scrypt</option>
+            <option value="DOGE">Dogecoin (DOGE) - Scrypt</option>
+            <option value="XMR">Monero (XMR) - RandomX</option>
           </select>
         </div>
 
@@ -80,12 +90,13 @@ function runMinerApp() {
           <select id="mode" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
             <option value="solo" selected>Solo - mine and keep the full block reward (default)</option>
             <option value="pplns">Shared Pool (btcpowlab) - PPLNS / hybrid, no account needed</option>
+            <option value="merged" id="mode-merged">Merged (LTC + DOGE) - one scrypt session, both chains</option>
             <option value="custom">Custom Pool - mine for your own pool</option>
           </select>
         </div>
 
         <div class="form-group" style="margin-bottom: 20px;">
-          <label for="address" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Wallet Address</label>
+          <label for="address" id="address-label" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Wallet Address</label>
           <input type="text" id="address" placeholder="Enter your BTC address" value="" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
           <div id="address-hint" style="margin-top: 8px; font-size: 12px; line-height: 1.45; opacity: 0.72; display: none;">
             No account or username is needed for the default pool &mdash; you are logged in automatically as
@@ -184,7 +195,11 @@ function runMinerApp() {
               <br><br>
               <strong>Custom Pool:</strong> enter your own pool's host, port and worker login &mdash; your hashes are credited to that pool/account.
               <br><br>
-              <strong>Engines:</strong> CPU runs the double-SHA256 search across Web Workers; GPU runs an efficient WebGPU (WGSL) SHA-256d kernel that scans millions of nonces per frame; CPU + GPU runs both at once. Browser mining is extremely limited and no block or reward is guaranteed.
+              <strong>Engines:</strong> Bitcoin can use CPU Web Workers (double-SHA-256) or the WebGPU (WGSL) SHA-256d kernel that scans millions of nonces per frame, or both at once. Litecoin, Dogecoin (Scrypt) and Monero (RandomX) are memory-hard by design and run on the CPU only, and they are orders of magnitude slower per hash - expect a few hashes per second, not millions. Browser mining is extremely limited and no block or reward is guaranteed.
+              <br><br>
+              <strong>Coins &amp; algorithms:</strong> the coin selector picks the proof of work the pool speaks. BTC = double-SHA-256d; LTC/DOGE = Scrypt (same Stratum dialect as Bitcoin, only the PoW hash differs); XMR = RandomX over the pool's block hashing blob, using xmrig's <code>login / job / submit</code> wire protocol instead of <code>subscribe / authorize / notify</code>. RandomX needs its WebAssembly module (<code>randomx.wasm</code>, built from <code>WebRandomX/</code>) served next to this page: until it loads the Monero worker reports it and <em>submits nothing</em>, because hashing without the real RandomX VM would only produce garbage. Litecoin also offers <em>Merged (LTC + DOGE)</em>: one scrypt session at an LTC pool that puts a Dogecoin block inside the Litecoin blocks it finds, so the same work is credited on both chains - the pool builds the auxpow, and this page only submits the same shares it always does.
+              <br><br>
+              <strong>Addresses:</strong> each coin validates its own wallet format before connecting - a Bitcoin address can never credit a Litecoin, Dogecoin or Monero share.
               <br><br>
               <em>Decentralization Note:</em> While this approach democratizes computation by distributing real network Proof-of-Work (SHA-256 for BTC) across many disparate browser instances, it has a limitation: the underlying submitted work routes through one centralized proxy (the bridge). This limits the "true" autonomy compared to running a full node locally, but successfully expands the overall hash pool to browsers.
           </p>
@@ -224,10 +239,113 @@ function runMinerApp() {
       poolWorker: document.getElementById("pool-worker"),
       poolPassword: document.getElementById("pool-password"),
       addressHint: document.getElementById("address-hint"),
+      addressLabel: document.getElementById("address-label"),
       poolDashboard: document.getElementById("pool-dashboard"),
-      consoleLog: document.getElementById("console-log"),
-      consoleClear: document.getElementById("console-clear"),
+      modeMerged: document.getElementById("mode-merged"),
     };
+
+    // ---- Coins -------------------------------------------------------------
+    // One table drives the whole page: the proof of work the pool speaks, the
+    // worker that runs it, whether a GPU path exists, and how a wallet address for
+    // that chain looks. The bridge chooses the upstream pool from ?coin=, so the
+    // only coin-specific knowledge on the page lives here.
+    //
+    //   stratum 'btc'   - Bitcoin-style subscribe / authorize / mining.notify
+    //                     (BTC double-SHA-256d; LTC + DOGE Scrypt - identical wire
+    //                     format, only the PoW hash differs)
+    //   stratum 'xmrig' - xmrig-style login / job / submit (XMR RandomX)
+    const COINS = {
+        BTC: {
+            name: 'Bitcoin', ticker: 'BTC', algo: 'SHA-256d',
+            stratum: 'btc', worker: 'miner-worker.js', gpu: true,
+            addressLabel: 'BTC Wallet Address',
+            placeholder: 'Enter your BTC address (bc1..., 1..., 3...)',
+            loginHint: 'your BTC address',
+            soloPool: 'solo.ckpool.org',
+            sharedPool: 'stratum.btcpowlab-pool.com',
+            pattern: /^(1|3|bc1)[a-zA-Z0-9]{25,59}$/,
+            invalid: 'Invalid Bitcoin address (expected bech32 "bc1..." or base58 "1..."/"3...").'
+        },
+        LTC: {
+            name: 'Litecoin', ticker: 'LTC', algo: 'Scrypt',
+            stratum: 'btc', worker: 'scrypt-worker.js', gpu: false,
+            addressLabel: 'LTC Wallet Address',
+            placeholder: 'Enter your Litecoin address (L..., M..., ltc1...)',
+            loginHint: 'your LTC address',
+            soloPool: 'ltc.viabtc.io',
+            sharedPool: 'ltc.viabtc.io',
+            // Merged mining is parented on Litecoin: one scrypt session against
+            // an LTC pool that embeds Dogecoin blocks (f2pool's own Litecoin
+            // page quotes revenue as "LTC + DOGE" per GH/s), so the same work is
+            // credited on both chains. Only this coin offers the merged mode -
+            // see applyCoinUI() and the bridge's MERGED_POOL_* settings.
+            mergedPool: 'ltc.f2pool.com:8888',
+            pattern: /^(ltc1[a-z0-9]{25,50}|[LM][1-9A-HJ-NP-Za-km-z]{25,40})$/,
+            invalid: 'Invalid Litecoin address (expected bech32 "ltc1..." or base58 "L..."/"M...").'
+        },
+        DOGE: {
+            name: 'Dogecoin', ticker: 'DOGE', algo: 'Scrypt',
+            stratum: 'btc', worker: 'scrypt-worker.js', gpu: false,
+            addressLabel: 'DOGE Wallet Address',
+            placeholder: 'Enter your Dogecoin address (D..., 9..., A...)',
+            loginHint: 'your DOGE address',
+            soloPool: 'doge.mine.zpool.ca',
+            sharedPool: 'doge.mine.zpool.ca',
+            pattern: /^(D|9|A)[1-9A-HJ-NP-Za-km-z]{25,33}$/,
+            invalid: 'Invalid Dogecoin address (expected a base58 "D..."/"9..."/"A..." address).'
+        },
+        XMR: {
+            name: 'Monero', ticker: 'XMR', algo: 'RandomX',
+            stratum: 'xmrig', worker: 'xmr-worker.js', gpu: false,
+            addressLabel: 'XMR Wallet Address',
+            placeholder: 'Enter your Monero address (4... standard, 8... subaddress)',
+            loginHint: 'your XMR address',
+            soloPool: 'pool.supportxmr.com',
+            sharedPool: 'pool.supportxmr.com',
+            // Standard (4...) and subaddress (8...) are 95 chars, integrated 106.
+            pattern: /^[48][1-9A-HJ-NP-Za-km-z]{93,105}$/,
+            invalid: 'Invalid Monero address (expected 95/106 base58 chars starting with 4 or 8).'
+        }
+    };
+    const DEFAULT_COIN = 'BTC';
+
+    // The "shared pool" has a different name (and host) on every chain, so the
+    // mode dropdown text follows the selected coin.
+    const MODE_LABELS = {
+        BTC: [
+            'Solo - mine and keep the full block reward (default)',
+            'Shared Pool (btcpowlab) - PPLNS / hybrid, no account needed',
+            'Merged (LTC + DOGE) - Litecoin mode only',
+            'Custom Pool - mine for your own pool'
+        ],
+        LTC: [
+            'Solo - your own LTC address pays out (ltc.viabtc.io)',
+            'Shared Pool (ltc.viabtc.io) - credited to your address',
+            'Merged (LTC + DOGE) - one scrypt session, both chains credited',
+            'Custom Pool - mine for your own pool'
+        ],
+        DOGE: [
+            'Solo - your own DOGE address pays out (doge.mine.zpool.ca)',
+            'Shared Pool (doge.mine.zpool.ca) - credited to your address',
+            'Merged (LTC + DOGE) - pick Litecoin above to mine the pair',
+            'Custom Pool - mine for your own pool'
+        ],
+        XMR: [
+            'Solo - your own address pays out (pool.supportxmr.com)',
+            'Shared Pool (pool.supportxmr.com) - credited to your address',
+            'Merged (LTC + DOGE) - scrypt only, not Monero',
+            'Custom Pool - mine for your own pool'
+        ]
+    };
+
+    // Selected-coin helpers. Everything downstream asks these instead of reading the
+    // <select> directly, so an unknown value can never break the miner.
+    function coinKey() {
+        const v = elements.coin.value;
+        return COINS[v] ? v : DEFAULT_COIN;
+    }
+    function currentCoin() { return COINS[coinKey()]; }
+    function isXmr() { return currentCoin().stratum === 'xmrig'; }
 
     // ---- On-page console --------------------------------------------------
     // A bounded, timestamped log that mirrors exactly what we also print to the
@@ -261,19 +379,21 @@ function runMinerApp() {
         });
     }
 
-    // Human-readable pool the bridge is currently mining to. Solo and PPLNS run
-    // through the public bridge, which dials these hosts; Custom uses the fields.
-    const SOLO_POOL_LABEL = 'solo.ckpool.org';
-    const PPLNS_POOL_LABEL = 'stratum.btcpowlab-pool.com';
+    // Human-readable pool the bridge is currently mining to. The bridge dials these
+    // hosts per coin (see the COINS table); Custom uses the typed-in fields.
     function getPoolLabel() {
         const mode = elements.mode.value;
+        const c = currentCoin();
         if (mode === 'custom') {
             const host = (elements.poolHost.value || '').trim();
             const port = (elements.poolPort.value || '').trim();
             if (!host) return 'custom pool';
             return port ? host + ':' + port : host;
         }
-        return mode === 'pplns' ? PPLNS_POOL_LABEL : SOLO_POOL_LABEL;
+        if (mode === 'merged') {
+            return (c.mergedPool || 'ltc.f2pool.com:8888') + ' (LTC + DOGE merged)';
+        }
+        return (mode === 'pplns' ? c.sharedPool : c.soloPool) + ' (' + c.ticker + ')';
     }
 
     // Outstanding share submissions, keyed by Stratum request id, so the pool's
@@ -283,9 +403,10 @@ function runMinerApp() {
     const pendingShares = new Map();
 
     // UI Event Listeners
+    // Switching coin re-labels the form (address field, mode options, engines) and
+    // rebuilds the engine list, because Scrypt and RandomX have no GPU path.
     elements.coin.addEventListener('change', () => {
-         elements.address.placeholder = "Enter your BTC Address";
-         initDevices();
+         applyCoinUI(true);
     });
 
     // Reflect the selected mode in the form: Solo / PPLNS use the wallet
@@ -294,39 +415,111 @@ function runMinerApp() {
 
     function applyModeUI() {
         const mode = elements.mode.value;
+        const c = currentCoin();
         const isCustom = mode === 'custom';
-        const isDefaultPool = mode === 'pplns';
+        const isSharedPool = mode === 'pplns';
+        const isMerged = mode === 'merged';
 
-        // The dashboard belongs to the default (btcpowlab) pool, so show it when
-        // that pool is in use - via the built-in mode or when the same host has
+        // The btcpowlab dashboard belongs to Bitcoin's built-in shared pool, so show
+        // it only when that pool is in use - via the mode, or when the same host has
         // been typed into the Custom Pool host field.
         const customHost = (elements.poolHost.value || '').trim().toLowerCase().split(':')[0];
-        const usesDefaultPool = isDefaultPool || customHost === DEFAULT_POOL_HOST;
+        const usesPowlab = coinKey() === 'BTC' && (isSharedPool || customHost === DEFAULT_POOL_HOST);
 
         elements.customGroup.style.display = isCustom ? 'block' : 'none';
         // The address field stays active in every mode so the user can set the
-        // worker login; on the default pool it becomes "<address>.browser".
+        // worker login; on the BTC shared pool it becomes "<address>.browser".
         elements.address.disabled = isCustom;
 
         if (elements.addressHint) {
-            elements.addressHint.style.display = isDefaultPool ? 'block' : 'none';
+            if (isSharedPool) {
+                elements.addressHint.style.display = 'block';
+                elements.addressHint.textContent =
+                    'No account is needed on ' + c.sharedPool + ' - the worker logs in as <' +
+                    c.loginHint + '>' + (coinKey() === 'BTC' ? '.browser' : '') +
+                    ' and is credited directly to it.' +
+                    (c.gpu ? '' : ' ' + c.name + ' is ' + c.algo + ': CPU only.');
+            } else if (isMerged) {
+                elements.addressHint.style.display = 'block';
+                elements.addressHint.textContent =
+                    'Merged mining is parented on Litecoin: ' +
+                    (c.mergedPool || 'ltc.f2pool.com:8888') + ' puts a Dogecoin block inside the ' +
+                    'Litecoin blocks you find, so one scrypt session is credited on both chains and ' +
+                    'the pool builds the auxpow. Log in with your LTC address or your pool account ' +
+                    'worker (f2pool uses "name.rig1") and set both payout addresses in that account - ' +
+                    'the pool pays out, this page only submits shares.';
+            } else {
+                elements.addressHint.style.display = 'none';
+            }
         }
         if (elements.poolDashboard) {
-            elements.poolDashboard.style.display = usesDefaultPool ? 'block' : 'none';
+            elements.poolDashboard.style.display = usesPowlab ? 'block' : 'none';
         }
 
         if (isCustom) {
             elements.address.placeholder = "(unused in Custom Pool mode)";
-        } else if (isDefaultPool) {
-            elements.address.placeholder = "Enter your BTC address (credited automatically)";
+        } else if (isSharedPool) {
+            elements.address.placeholder = c.placeholder + ' (credited automatically)';
         } else {
-            elements.address.placeholder = "Enter your BTC address";
+            elements.address.placeholder = c.placeholder;
         }
+    }
+
+    // Reflect the selected coin across the whole form: address label/placeholder,
+    // engine list (only Bitcoin has a GPU kernel), mode option text and pool notes.
+    // Called once at start-up and on every coin change.
+    function applyCoinUI(rebuildDevices) {
+        const c = currentCoin();
+
+        if (elements.addressLabel) elements.addressLabel.textContent = c.addressLabel;
+
+        // The shared pool is a different host on every chain, so the mode dropdown
+        // text is coin-specific too.
+        const labels = MODE_LABELS[coinKey()] || MODE_LABELS[DEFAULT_COIN];
+        Array.prototype.forEach.call(elements.mode.options, (opt, i) => {
+            if (labels[i]) opt.textContent = labels[i];
+        });
+
+        // Merged mining is parented on Litecoin (the LTC pool embeds the DOGE
+        // block), so only Litecoin can select it. On the other coins the option
+        // stays visible but disabled, with its label saying what to pick
+        // instead - and a selection made before the coin change falls back to
+        // Solo rather than silently mining something else.
+        if (elements.modeMerged) {
+            const canMerge = !!c.mergedPool;
+            elements.modeMerged.disabled = !canMerge;
+            if (!canMerge && elements.mode.value === 'merged') {
+                elements.mode.value = 'solo';
+            }
+        }
+
+        // A new coin starts from a clean slate: the previous chain's job,
+        // difficulty and best share are meaningless here.
+        currentBits = 0;
+        window.currentStratumJob = null;
+        window.currentXmrJob = null;
+        bestShareDiff = 0;
+        poolSubmitFloor = 0;
+        elements.bestShare.textContent = '0';
+        elements.bestShare.title = '';
+        elements.networkDiff.textContent = '...';
+        elements.networkDiff.title = '';
+        elements.shareDiff.textContent = '...';
+        elements.networkBlock.textContent = '...';
+
+        // Scrypt / RandomX are memory-hard: CPU only (see COINS[].gpu).
+        if (rebuildDevices) initDevices();
+
+        elements.address.placeholder = c.placeholder;
+        logLine('Coin set to ' + c.name + ' (' + c.ticker + ') - proof of work: ' + c.algo +
+            (c.gpu ? ', CPU + optional GPU.' : ', CPU only.'), 'info');
+        applyModeUI();
     }
 
     elements.mode.addEventListener('change', applyModeUI);
     elements.poolHost.addEventListener('input', applyModeUI);
     applyModeUI();
+    applyCoinUI(false);
 
     elements.intensity.addEventListener('input', (e) => {
         // Each workgroup scans 64 nonces; show the per-frame nonce count.
@@ -458,7 +651,33 @@ function runMinerApp() {
         return d.toPrecision(3);
     }
 
+    // Hashrate with the unit scaled to the engine: SHA-256 walks millions of nonces
+    // per second (kH/s - GH/s), while Scrypt and RandomX are memory-hard and often
+    // report only a few hashes per second.
+    function formatHashrate(hs) {
+        if (!isFinite(hs) || hs <= 0) return '0 H/s';
+        if (hs >= 1e9) return (hs / 1e9).toFixed(2) + ' GH/s';
+        if (hs >= 1e6) return (hs / 1e6).toFixed(2) + ' MH/s';
+        if (hs >= 1e3) return (hs / 1e3).toFixed(2) + ' kH/s';
+        if (hs >= 1) return hs.toFixed(2) + ' H/s';
+        return hs.toPrecision(3) + ' H/s';
+    }
+
     async function fetchNetworkData() {
+        const c = currentCoin();
+        // Bitcoin's public mempool.space API is the only chain explorer wired up here
+        // (CORS-enabled, no key needed). Every other coin reads its block height from
+        // the pool's jobs instead, so its tiles stay pool-driven.
+        if (coinKey() !== 'BTC') {
+            elements.status.textContent = "Syncing with the " + c.name + " pool...";
+            elements.networkDiff.textContent = "Pool";
+            elements.networkDiff.title = "The " + c.ticker + " pool sets the difficulty with each job; " +
+                "the value it credits is shown as Share Difficulty.";
+            elements.networkStatus.textContent = "Pool Mode";
+            elements.networkStatus.style.color = "#2196f3";
+            return true;
+        }
+
         elements.status.textContent = "Syncing with Bitcoin Mainnet...";
         try {
             // Get latest block list (returns array of 10 recent blocks)
@@ -514,7 +733,8 @@ function runMinerApp() {
     // pass their host/port through the query string for the bridge to dial.
     function buildBridgeUrl() {
         const mode = elements.mode.value;
-        let url = BRIDGE_URL + "?coin=BTC&mode=" + encodeURIComponent(mode);
+        let url = BRIDGE_URL + "?coin=" + encodeURIComponent(coinKey()) +
+                  "&mode=" + encodeURIComponent(mode);
         if (mode === 'custom') {
             url += "&host=" + encodeURIComponent(elements.poolHost.value.trim());
             url += "&port=" + encodeURIComponent(elements.poolPort.value.trim());
@@ -528,10 +748,25 @@ function runMinerApp() {
             return [elements.poolWorker.value.trim(), elements.poolPassword.value || "x"];
         }
         const addr = elements.address.value.trim();
+        if (isXmr()) {
+            // Monero pools take the wallet address (optionally "address.worker") as
+            // the login and ignore the password entirely.
+            return [addr, "x"];
+        }
+        if (elements.mode.value === 'merged') {
+            // The merged endpoint is an LTC pool that embeds DOGE blocks: a bare
+            // LTC address (verified against ltc.f2pool.com:8888, which answered
+            // mining.authorize with true) or a pool account worker both work.
+            return [addr, "x"];
+        }
         if (elements.mode.value === 'pplns') {
-            // The default shared pool (btcpowlab) expects the worker login
-            // "<btc-address>.browser" and accepts any password.
-            return [(addr ? addr + ".browser" : ""), "x"];
+            if (coinKey() === 'BTC') {
+                // The default shared pool (btcpowlab) expects the worker login
+                // "<btc-address>.browser" and accepts any password.
+                return [(addr ? addr + ".browser" : ""), "x"];
+            }
+            // LTC / DOGE pools (viabtc, zpool.ca) credit the bare address.
+            return [addr, "x"];
         }
         return [addr, "web"];
     }
@@ -560,13 +795,24 @@ function runMinerApp() {
     }
 
     // Lightweight application keepalive: keeps client -> server traffic flowing
-    // so an idle proxy cannot silently close a quiet pool session. The bridge
-    // answers "mining.ping" locally and never forwards it to the pool.
+    // so an idle proxy cannot silently close a quiet pool session. Bitcoin-style
+    // sessions answer "mining.ping" locally in the bridge and never forward it to
+    // the pool; Monero sessions send xmrig's own "keepalived", which the pool
+    // understands (and which also makes it push a fresh job when it has one).
     function startKeepalive() {
         stopKeepalive();
         keepaliveTimer = setInterval(() => {
             if (stratumConnected && stratumWs && stratumWs.readyState === 1) {
-                try { stratumWs.send(JSON.stringify({ id: 4, method: 'mining.ping', params: [] })); } catch (e) {}
+                try {
+                    if (isXmr()) {
+                        stratumWs.send(JSON.stringify({
+                            id: 900, jsonrpc: '2.0', method: 'keepalived',
+                            params: { id: window.stratumClientId || '' }
+                        }));
+                    } else {
+                        stratumWs.send(JSON.stringify({ id: 4, method: 'mining.ping', params: [] }));
+                    }
+                } catch (e) {}
             }
         }, 15000);
     }
@@ -576,6 +822,11 @@ function runMinerApp() {
     }
 
     function connectToStratum() {
+        // Monero pools speak xmrig's "login / job / submit" protocol, not Bitcoin's
+        // subscribe / authorize / notify dialect. Same bridge, same WebSocket,
+        // completely different handshake.
+        if (isXmr()) return connectToXmrStratum();
+
         return new Promise((resolve, reject) => {
             elements.status.textContent = "Connecting to Stratum Bridge...";
             logLine('Opening Stratum bridge ' + BRIDGE_URL + ' (mode: ' + elements.mode.value + ').', 'info');
@@ -686,13 +937,14 @@ function runMinerApp() {
                         // must reach to actually solve a block. Share difficulty
                         // (below) is a much lower bar and never changes this; the
                         // pool - not this page - broadcasts a block, and only when
-                        // a share also meets this network target.
+                        // a share also meets this network target. The 2^32-hashes-per-
+                        // difficulty convention is shared by the BTC and scrypt pools.
                         try {
                             const netBits = parseInt(params[6], 16) >>> 0;
                             currentBits = netBits;
                             const netDiff = SHA256Crypto.nbitsToDifficulty(netBits);
                             elements.networkDiff.textContent = formatDifficulty(netDiff);
-                            elements.networkDiff.title = 'Real Bitcoin network difficulty, read live from this job\'s block header (nBits ' +
+                            elements.networkDiff.title = 'Real ' + currentCoin().name + ' network difficulty, read live from this job\'s block header (nBits ' +
                                 params[6] + '). Solving a block needs a hash at or below the matching target; the pool broadcasts it, not this page.';
                         } catch (e) {}
 
@@ -794,18 +1046,226 @@ function runMinerApp() {
         });
     }
 
+    // ---- XMR stratum client (xmrig wire protocol) -------------------------
+    // Monero pools use xmrig's dialect, which the generic bridge relays verbatim:
+    //
+    //   -> {"id":1,"jsonrpc":"2.0","method":"login","params":{login,pass,agent,algo}}
+    //   <- {"id":1,"jsonrpc":"2.0","error":null,"result":{id,job:{...},status:"OK"}}
+    //   <- {"jsonrpc":"2.0","method":"job","params":{...}}
+    //   -> {"id":N,"jsonrpc":"2.0","method":"submit",
+    //       "params":{id:<pool client id>,job_id,nonce,result}}
+    //   <- {"id":N,"jsonrpc":"2.0","error":null,"result":{"status":"OK"}}
+    //
+    // The pool's own client id (result.id of the login) has to be echoed on every
+    // submit, and there is no extranonce1/2 and no set_difficulty: the job carries
+    // the block hashing blob (with the nonce reserved inside it) and its own target.
+    //
+    // xmrig errors are objects ({"code":-1,"message":"..."}) where Bitcoin's pools
+    // send arrays, so both shapes are normalized here.
+    function xmrErrorText(err) {
+        if (!err) return 'unknown error';
+        if (typeof err === 'string') return err;
+        if (err.message) return err.message + (err.code !== undefined ? ' (code ' + err.code + ')' : '');
+        if (Array.isArray(err)) return err.length > 1 ? String(err[1]) : JSON.stringify(err);
+        return JSON.stringify(err);
+    }
+
+    // Hand a pool job to the RandomX workers and refresh the tiles. The job is
+    // normalized (randomx.js) so the worker gets exactly what it needs: the blob,
+    // its 64-bit target, the height and the epoch seed hash.
+    function acceptXmrJob(params) {
+        if (!params) return;
+        if (!window.XmrCrypto) {
+            logLine('randomx.js is not loaded on this page - cannot use Monero jobs.', 'error');
+            return;
+        }
+        const job = window.XmrCrypto.normalizeJob(params);
+        if (!job) {
+            logLine('The pool sent a job without a usable blob/target - ignoring it.', 'warn');
+            return;
+        }
+        window.currentXmrJob = job;
+
+        const jobId = job.job_id;
+        elements.networkBlock.textContent = job.height ? ('Block #' + job.height) : ('Job ' + jobId.substring(0, 6));
+        elements.status.textContent = 'Mining Job: ' + jobId;
+
+        // A Monero job sets its own target (no separate set_difficulty), so the job's
+        // difficulty IS the accept bar for the next share - the worker only reports
+        // hashes below that target.
+        poolSubmitFloor = job.difficulty;
+        elements.shareDiff.textContent = formatDifficulty(job.difficulty) + ' min';
+        elements.shareDiff.title = 'Difficulty carried by this Monero job\'s target: the worker looks for hashes whose 64-bit value is below it.';
+        elements.networkDiff.textContent = formatDifficulty(job.difficulty);
+        elements.networkDiff.title = 'Difficulty set by this job\'s target. Soloing a block needs a hash at or below the same target; the pool broadcasts the block, not this page.';
+
+        if (jobId !== lastLoggedJob) {
+            lastLoggedJob = jobId;
+            logLine('New XMR job ' + jobId + (job.height ? ' (height ' + job.height + ')' : '') +
+                ' - share difficulty ' + formatDifficulty(job.difficulty) + '.', 'info');
+        }
+
+        broadcastToWorkers({ cmd: 'job', job: job });
+    }
+
+
+    function connectToXmrStratum() {
+        return new Promise((resolve, reject) => {
+            elements.status.textContent = "Connecting to the Monero pool...";
+            logLine('Opening Stratum bridge ' + BRIDGE_URL + ' (coin: XMR, mode: ' + elements.mode.value + ').', 'info');
+
+            // Fresh connection -> forget the previous session's client id and job.
+            suggestedDifficulty = false;
+            poolSubmitFloor = 0;
+            poolLatchHighestDifficulty = false;
+            window.currentXmrJob = null;
+            window.stratumClientId = null;
+
+            try {
+                const ws = new WebSocket(buildBridgeUrl());
+                stratumWs = ws;
+
+                // Guard against pools that never answer the login.
+                const connectTimeout = setTimeout(() => {
+                    try { ws.close(); } catch (e) {}
+                    reject(new Error("Timed out waiting for the Monero pool login"));
+                }, 20000);
+
+                ws.onopen = function () {
+                    if (ws !== stratumWs) return;
+                    console.log("Stratum Connected (XMR)");
+                    elements.status.textContent = "Bridge Connected. Logging in...";
+                    elements.networkStatus.textContent = "Connecting...";
+                    elements.networkStatus.style.color = "#ffb020";
+                    logLine('Bridge connected. Logging in with the XMR address...', 'info');
+                    const auth = getAuthParams();
+                    // The wallet address is the login (optionally "address.worker"),
+                    // the password is up to the pool, and "algo" pins the RandomX
+                    // variant this miner's WASM VM implements (rx/0 = Monero mainnet).
+                    ws.send(JSON.stringify({
+                        id: 1,
+                        jsonrpc: "2.0",
+                        method: "login",
+                        params: {
+                            login: auth[0],
+                            pass: auth[1],
+                            agent: "web-miner/1.0",
+                            algo: ["rx/0"]
+                        }
+                    }));
+                };
+
+                ws.onmessage = function (event) {
+                    if (ws !== stratumWs) return;
+                    let msg;
+                    try { msg = JSON.parse(event.data); } catch (e) { return; }
+
+                    // Reply to one of our mining.submit calls. xmrig reads "no error
+                    // object" as accepted, so that is the check here too.
+                    if (msg.id !== undefined && pendingShares.has(msg.id)) {
+                        const info = pendingShares.get(msg.id);
+                        pendingShares.delete(msg.id);
+                        if (!msg.error) {
+                            logLine('Share ACCEPTED by ' + info.pool + ' (nonce ' + info.nonceHex +
+                                ', ' + Math.max(0, Date.now() - info.at) + ' ms)', 'ok');
+                        } else {
+                            logLine('Share REJECTED by ' + info.pool + ' (nonce ' + info.nonceHex +
+                                '): ' + xmrErrorText(msg.error), 'error');
+                        }
+                        return;
+                    }
+
+                    // Pool-pushed job (new block, or the answer to a keepalived).
+                    if (msg.method === 'job') {
+                        acceptXmrJob(msg.params);
+                        return;
+                    }
+
+                    // Login reply: result.id is the client id every submit must echo.
+                    if (msg.id === 1) {
+                        clearTimeout(connectTimeout);
+                        if (msg.error) {
+                            const reason = xmrErrorText(msg.error);
+                            logLine('Monero pool rejected the login: ' + reason, 'error');
+                            reject(new Error(reason));
+                            return;
+                        }
+                        const result = msg.result || {};
+                        stratumConnected = true;
+                        reconnectAttempts = 0;
+                        if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+                        window.stratumClientId = result.id !== undefined ? result.id : null;
+                        elements.status.textContent = "Logged in. Waiting for jobs...";
+                        elements.networkStatus.textContent = "Stratum Active";
+                        elements.networkStatus.style.color = "#3ddc84";
+                        logLine('Logged in as "' + getSubmitUser() + '" - mining to ' + getPoolLabel() +
+                            (window.stratumClientId !== null ? ' (client id ' + window.stratumClientId + ')' : '') + '.', 'ok');
+                        // The login reply normally carries the first job already.
+                        if (result.job) acceptXmrJob(result.job);
+                        startKeepalive();
+                        resolve(true);
+                    }
+                };
+
+                ws.onerror = function (e) {
+                    if (ws !== stratumWs) return;
+                    console.error("Stratum WS Error", e);
+                    logLine('Bridge WebSocket error.', 'error');
+                    reject(e);
+                };
+
+                // Same reconnect policy as the Bitcoin path: a dropped bridge must not
+                // silently stop mining or freeze the UI.
+                ws.onclose = function (event) {
+                    if (ws !== stratumWs) return;
+                    clearTimeout(connectTimeout);
+                    stratumConnected = false;
+                    stopKeepalive();
+                    const code = event && event.code;
+                    const reason = event && event.reason;
+                    console.log("Stratum Closed", code, reason);
+                    logLine('Bridge connection closed' +
+                        (code ? ' (code ' + code + (reason ? ': ' + reason : '') + ')' : '') + '.', 'warn');
+                    if (wantMining) {
+                        elements.networkStatus.textContent = "Reconnecting...";
+                        elements.networkStatus.style.color = "#ffb020";
+                        elements.status.textContent = "Bridge disconnected - reconnecting...";
+                        scheduleReconnect();
+                    } else {
+                        elements.networkStatus.textContent = "Only Local";
+                        elements.networkStatus.style.color = "#aaa";
+                    }
+                };
+
+            } catch (e) {
+                reject(e);
+            }
+        });
+    }
+
+
     async function initDevices() {
       elements.device.innerHTML = '';
-      
+
+      const c = currentCoin();
       const cpuCount = navigator.hardwareConcurrency || 4;
       elements.threads.value = Math.max(1, Math.floor(cpuCount / 2));
       elements.threads.max = cpuCount;
 
       const cpuOpt = document.createElement('option');
       cpuOpt.value = 'cpu';
-      cpuOpt.textContent = `CPU - ${cpuCount} thread(s), JavaScript SHA-256`;
+      cpuOpt.textContent = `CPU - ${cpuCount} thread(s), JavaScript ${c.algo}`;
       cpuOpt.selected = true;
       elements.device.appendChild(cpuOpt);
+
+      // Only Bitcoin ships a WebGPU kernel (COINS[].gpu): Scrypt and RandomX are
+      // memory-hard and run in CPU workers only, so those coins get no GPU entry.
+      if (!c.gpu) {
+          elements.cpuGroup.style.display = 'block';
+          elements.gpuGroup.style.display = 'none';
+          elements.status.textContent = "Ready.";
+          return;
+      }
 
       if (navigator.gpu) {
         try {
@@ -827,7 +1287,7 @@ function runMinerApp() {
 
             const gpuOpt = document.createElement('option');
             gpuOpt.value = 'gpu';
-            gpuOpt.textContent = `GPU - WebGPU SHA-256d (${infoString})`;
+            gpuOpt.textContent = `GPU - WebGPU ${c.algo} (${infoString})`;
             elements.device.appendChild(gpuOpt);
 
             const hybridOpt = document.createElement('option');
@@ -843,19 +1303,55 @@ function runMinerApp() {
     }
 
     // ---- CPU mining workers ----------------------------------------------
-    // miner-worker.js imports sha256.js and runs the optimized nonce search.
+    // One worker file per coin family: miner-worker.js (double SHA-256, BTC),
+    // scrypt-worker.js (LTC/DOGE) and xmr-worker.js (RandomX, XMR). All three speak
+    // the same start/stop/job/difficulty protocol and answer with the same
+    // { hashes } / { best } / { share } messages, so only the URL changes here.
     function makeWorker() {
-        const w = new Worker('miner-worker.js');
+        const w = new Worker(currentCoin().worker);
         w.onmessage = (e) => {
-            if (e.data.hashes) totalHashes += e.data.hashes;
+            const d = e.data || {};
+            // xmr-worker.js only: RandomX WASM lifecycle (see handleVmState).
+            if (d.vm) { handleVmState(d); return; }
+            if (d.jobError) { logLine('Worker rejected a job: ' + d.jobError, 'error'); return; }
+            if (d.hashes) totalHashes += d.hashes;
             // Rarest hash this worker has found so far (sub-target hashes too) ->
             // drives the "Best Share" tile. It is not submitted unless it also
             // clears the pool's advertised difficulty (see offerShare).
-            if (e.data.best) updateBestShare(e.data.best.difficulty);
-            if (e.data.share) offerShare(e.data.job_id, e.data.en2, e.data.ntime, e.data.nonce, e.data.difficulty);
+            if (d.best) updateBestShare(d.best.difficulty);
+            if (d.share) handleShareMessage(d);
         };
-        w.onerror = (err) => { console.error('Mining worker error', err); };
+        w.onerror = (err) => {
+            console.error('Mining worker error', err);
+            logLine('Mining worker error: ' + (err && err.message ? err.message : err), 'error');
+        };
         return w;
+    }
+
+    // A share message differs per coin family: the Bitcoin and scrypt workers report
+    // an extranonce2 + ntime (the page assembles their blobs from the Merkle tree),
+    // while the RandomX worker reports only the nonce and the raw digest because the
+    // pool's block hashing blob already contains everything else.
+    function handleShareMessage(d) {
+        if (isXmr()) offerXmrShare(d);
+        else offerShare(d.job_id, d.en2, d.ntime, d.nonce, d.difficulty);
+    }
+
+    // xmr-worker.js reports the RandomX WASM lifecycle. Monero cannot be mined
+    // without the real VM (randomx.js refuses to hash without it), so the page must
+    // say so instead of silently hashing nothing.
+    function handleVmState(d) {
+        if (d.vm === 'loading') {
+            elements.status.textContent = 'Loading the RandomX WebAssembly VM...';
+            logLine('Loading randomx.wasm - the RandomX VM this CPU will hash with...', 'info');
+        } else if (d.vm === 'ready') {
+            logLine('RandomX VM ready' + (d.version ? ' (' + d.version + ')' : '') + ' - hashing now.', 'ok');
+            elements.status.textContent = 'Mining with RandomX...';
+        } else if (d.vm === 'unavailable') {
+            logLine('RandomX WebAssembly is unavailable: ' + d.error +
+                ' - Monero mining cannot run. Build WebRandomX/randomx.wasm (see crypto-frontend/README.md).', 'error');
+            elements.status.textContent = 'RandomX WASM missing - Monero mining unavailable.';
+        }
     }
 
     // Format `bytes` random bytes as hex (used for extranonce2). The argument is a
@@ -869,14 +1365,22 @@ function runMinerApp() {
     }
 
     // Update the "best share" tile when a rarer hash is found (submitted or not).
+    // Shares are compared against the chain's block target, which this page only
+    // knows for Bitcoin (currentBits comes from mempool.space); for Scrypt and
+    // RandomX the tile just reports the difficulty the worker computed.
     function updateBestShare(shareDiff) {
         if (!(typeof shareDiff === 'number' && isFinite(shareDiff)) || shareDiff <= bestShareDiff) return false;
         bestShareDiff = shareDiff;
-        const netDiff = currentBits ? SHA256Crypto.nbitsToDifficulty(currentBits) : 0;
         elements.bestShare.textContent = formatDifficulty(shareDiff);
-        elements.bestShare.title = 'Rarest hash found so far, as a difficulty. Solving a block needs ' +
-            formatDifficulty(netDiff) + '; this best share is ' +
-            (netDiff > 0 ? (shareDiff / netDiff).toExponential(3) : '0') + ' of the way there.';
+        const netDiff = (coinKey() === 'BTC' && currentBits) ? SHA256Crypto.nbitsToDifficulty(currentBits) : 0;
+        if (netDiff > 0) {
+            elements.bestShare.title = 'Rarest hash found so far, as a difficulty. Solving a block needs ' +
+                formatDifficulty(netDiff) + '; this best share is ' +
+                (shareDiff / netDiff).toExponential(3) + ' of the way there.';
+        } else {
+            elements.bestShare.title = 'Rarest hash found so far, as a difficulty, on the same scale as the ' +
+                'share difficulty this ' + currentCoin().ticker + ' pool advertises.';
+        }
         return true;
     }
 
@@ -885,7 +1389,11 @@ function runMinerApp() {
     // (which is what produced a wall of rejections when we gated too low), so below
     // that bar we just track it as our best local share and send nothing.
     function offerShare(jobId, en2, ntime, nonceHex, shareDiff) {
-        if (poolSubmitFloor > 0 && typeof shareDiff === 'number' && isFinite(shareDiff) && shareDiff < poolSubmitFloor) {
+        // Workers report rarity on Bitcoin's difficulty scale; scrypt pools count
+        // difficulty in units 65536x smaller, so convert before comparing to the
+        // pool's advertised (pool-scale) difficulty.
+        const poolScaleDiff = (typeof shareDiff === 'number' && currentCoin().algo === 'Scrypt') ? shareDiff * 65536 : shareDiff;
+        if (poolSubmitFloor > 0 && typeof poolScaleDiff === 'number' && isFinite(poolScaleDiff) && poolScaleDiff < poolSubmitFloor) {
             if (updateBestShare(shareDiff)) {
                 logLine('Best local share so far: difficulty ' + formatDifficulty(shareDiff) + ' (nonce ' + nonceHex +
                     ') - below ' + getPoolLabel() + "'s " + formatDifficulty(poolSubmitFloor) +
@@ -922,6 +1430,43 @@ function runMinerApp() {
         workers.forEach((w) => { try { w.postMessage(msg); } catch (e) {} });
     }
 
+    // Monero shares go out as xmrig's mining.submit: the pool's own client id (given
+    // at login), the job id, our 4 nonce bytes and the raw RandomX digest - there is
+    // no extranonce2 / ntime, they are already inside the pool's blob.
+    function offerXmrShare(d) {
+        if (!stratumWs || stratumWs.readyState !== 1) {
+            logLine('Found a share but the bridge is not connected - dropping it.', 'warn');
+            return;
+        }
+        if (window.stratumClientId === null || window.stratumClientId === undefined) {
+            logLine('Found a share before the pool gave us a client id - dropping it.', 'warn');
+            return;
+        }
+        const pool = getPoolLabel();
+        const id = 1000 + (++shareSeq);
+        pendingShares.set(id, { pool: pool, nonceHex: d.nonce, at: Date.now() });
+        try {
+            stratumWs.send(JSON.stringify({
+                id: id, jsonrpc: '2.0', method: 'submit',
+                params: {
+                    id: window.stratumClientId,
+                    job_id: d.job_id,
+                    nonce: d.nonce,
+                    result: d.result
+                }
+            }));
+        } catch (e) {
+            pendingShares.delete(id);
+            logLine('Could not send the share: ' + (e && e.message ? e.message : e), 'error');
+            return;
+        }
+        sharesFound++;
+        updateBestShare(d.difficulty);
+        elements.status.textContent = 'Share found & submitted to ' + pool + ' (total ' + sharesFound + ')';
+        logLine('Share found: nonce ' + d.nonce + ' at difficulty ' + formatDifficulty(d.difficulty || 0) +
+            ' -> submitted to ' + pool + ' (total ' + sharesFound + ')', 'pool');
+    }
+
     // Ask the pool for the lowest (difficulty 1) share difficulty, once per
     // connection. Harmless if the pool ignores it - what we submit is still gated
     // by poolSubmitFloor.
@@ -941,16 +1486,23 @@ function runMinerApp() {
         const threadCount = Math.max(1, parseInt(elements.threads.value, 10) || 1);
         for (let i = 0; i < threadCount; i++) {
             const w = makeWorker();
-            if (window.currentStratumJob) {
-                w.postMessage({
-                    cmd: 'job', job: window.currentStratumJob,
-                    extranonce1: window.stratumExtranonce1,
-                    en2: randHex(window.stratumExtranonce2Size || 4),
-                    extranonce2Size: window.stratumExtranonce2Size || 4
-                });
+            if (isXmr()) {
+                // RandomX workers mine the pool's blob directly: no extranonce1/2 and no
+                // ntime to assemble, so the job goes over as-is (the target travels with
+                // it as well, which is why no difficulty message is needed either).
+                if (window.currentXmrJob) w.postMessage({ cmd: 'job', job: window.currentXmrJob });
+            } else {
+                if (window.currentStratumJob) {
+                    w.postMessage({
+                        cmd: 'job', job: window.currentStratumJob,
+                        extranonce1: window.stratumExtranonce1,
+                        en2: randHex(window.stratumExtranonce2Size || 4),
+                        extranonce2Size: window.stratumExtranonce2Size || 4
+                    });
+                }
+                // Every worker searches at difficulty 1 (see SEARCH_DIFFICULTY).
+                w.postMessage({ cmd: 'difficulty', difficulty: SEARCH_DIFFICULTY });
             }
-            // Every worker searches at difficulty 1 (see SEARCH_DIFFICULTY).
-            w.postMessage({ cmd: 'difficulty', difficulty: SEARCH_DIFFICULTY });
             w.postMessage({ cmd: 'start' });
             workers.push(w);
         }
@@ -1097,31 +1649,40 @@ function runMinerApp() {
       elements.runtime.textContent = `${pad(h)}:${pad(m)}:${pad(s)}`;
 
       const hs = totalHashes / (diff || 1);
-      elements.hashrate.textContent = `${(hs / 1000000).toFixed(2)} MH/s`;
+      elements.hashrate.textContent = formatHashrate(hs);
       elements.totalHashesDisplay.textContent = totalHashes.toLocaleString();
     }
 
     elements.startBtn.addEventListener("click", async () => {
       const mode = elements.mode.value;
-      const coin = elements.coin.value;
+      const coin = coinKey();
+      const c = COINS[coin];
       const addr = elements.address.value.trim();
 
-      // Validate the inputs required by the selected mode.
+      // Validate the inputs required by the selected mode. Every coin checks its own
+      // wallet format, so an address for the wrong chain can never be submitted.
       if (mode === 'solo' || mode === 'pplns') {
           if (!addr) {
-            elements.status.textContent = "Error: BTC wallet address required for " + (mode === 'solo' ? "Solo" : "the shared pool") + " mining";
-            logLine('Enter a BTC wallet address to start ' + (mode === 'solo' ? 'Solo' : 'shared-pool') + ' mining.', 'error');
+            elements.status.textContent = "Error: " + c.ticker + " wallet address required for " + (mode === 'solo' ? "Solo" : "the shared pool") + " mining";
+            logLine('Enter a ' + c.ticker + ' wallet address to start ' + (mode === 'solo' ? 'Solo' : 'shared-pool') + ' mining.', 'error');
             elements.address.focus();
             return;
           }
 
-          if (coin === 'BTC') {
-              if (!/^(1|3|bc1)[a-zA-Z0-9]{25,59}$/.test(addr)) {
-                  elements.status.textContent = "Error: Invalid Bitcoin address format";
-                  logLine('Invalid Bitcoin address format.', 'error');
-                  elements.address.focus();
-                  return;
-              }
+          if (!c.pattern.test(addr)) {
+              elements.status.textContent = "Error: " + c.invalid;
+              logLine(c.invalid, 'error');
+              elements.address.focus();
+              return;
+          }
+      } else if (mode === 'merged') {
+          // Log in with an LTC address (the parent chain) or a pool account
+          // worker; the merged pool accepts either and pays both chains.
+          if (!/^[A-Za-z0-9_.-]{3,64}$/.test(addr)) {
+            elements.status.textContent = "Error: Merged mode logs in with your LTC address or pool account worker";
+            logLine('Enter the LTC address (or a pool account worker such as "name.rig1") the merged pool should credit.', 'error');
+            elements.address.focus();
+            return;
           }
       } else if (mode === 'custom') {
           const poolHostVal = elements.poolHost.value.trim();
@@ -1152,8 +1713,16 @@ function runMinerApp() {
            }
       }
       
+      // Scrypt and RandomX are memory-hard and CPU only, so force the CPU engine even
+      // if the dropdown still shows a GPU option.
+      let deviceMode = elements.device.value;
+      if (!c.gpu && deviceMode !== 'cpu') {
+          deviceMode = 'cpu';
+          elements.device.value = 'cpu';
+          logLine(c.name + ' has no GPU kernel here - using the CPU engine.', 'warn');
+      }
+
       // Make sure a GPU engine has an adapter before we commit to mining.
-      const deviceMode = elements.device.value;
       if ((deviceMode === 'gpu' || deviceMode === 'hybrid') && !adapter) {
           if (navigator.gpu) await initDevices(); // re-detect the adapter
           if (!adapter) {
@@ -1184,8 +1753,10 @@ function runMinerApp() {
         startUiLoop();
         if (deviceMode === 'cpu' || deviceMode === 'hybrid') startCpuMining();
         if (deviceMode === 'gpu' || deviceMode === 'hybrid') await startGpuMining();
-        elements.status.textContent = "Mining started (" + deviceMode.toUpperCase() + ")...";
-        logLine('Mining started - engine: ' + deviceMode.toUpperCase() + '.', 'ok');
+        const sessionLabel = mode === 'merged' ? 'LTC + DOGE (merged)' : c.ticker;
+        elements.status.textContent = "Mining " + sessionLabel + " (" + deviceMode.toUpperCase() + ")...";
+        logLine('Mining ' + sessionLabel + ' started - engine: ' + deviceMode.toUpperCase() +
+            ' (' + c.algo + ').', 'ok');
       } catch (e) {
         console.error(e);
         elements.status.textContent = "Mining failed: " + e.message;
@@ -1226,7 +1797,7 @@ function runMinerApp() {
       elements.status.style.color = "inherit";
     });
 
-    logLine('Miner ready. Enter your BTC address and press Start Mining.', 'info');
+    logLine('Miner ready. Pick a coin, enter its wallet address and press Start Mining.', 'info');
     initDevices();
 }
 

@@ -1,4 +1,4 @@
-# BTC-only WebSocket -> Stratum TCP bridge
+# Multi-coin (BTC / LTC / DOGE / XMR) WebSocket -> Stratum TCP bridge
 FROM node:20-slim
 
 WORKDIR /app
