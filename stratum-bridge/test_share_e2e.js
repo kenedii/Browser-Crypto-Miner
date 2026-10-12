@@ -69,12 +69,12 @@ function verifyShare(en2, ntime, nonceHex) {
     let merkle = dsha(coinbase);
     for (const br of JOB.merkle_branch) merkle = dsha(Buffer.concat([merkle, Buffer.from(br, 'hex')]));
     const header = Buffer.alloc(80);
-    header.write(JOB.version, 0, 'hex');
+    header.writeUInt32LE(parseInt(JOB.version, 16) >>> 0, 0);
     Buffer.from(internalPrevhash, 'hex').copy(header, 4);
     merkle.copy(header, 36);
-    header.write(ntime, 68, 'hex');
-    header.write(JOB.nbits, 72, 'hex');
-    header.write(nonceHex, 76, 'hex');
+    header.writeUInt32LE(parseInt(ntime, 16) >>> 0, 68);
+    header.writeUInt32LE(parseInt(JOB.nbits, 16) >>> 0, 72);
+    header.writeUInt32LE(parseInt(nonceHex, 16) >>> 0, 76);
     const displayed = Buffer.from(dsha(header)).reverse();
     return BigInt('0x' + displayed.toString('hex')) <= targetFor(DIFF);
 }
@@ -159,8 +159,7 @@ mock.listen(MOCK_PORT, '127.0.0.1', () => {
         cwd: __dirname,
         env: Object.assign({}, process.env, {
             PORT: String(BRIDGE_PORT),
-            BTC_POOL_HOST: '127.0.0.1', BTC_POOL_PORT: String(MOCK_PORT),
-            DISABLE_DEV_FEE: '1'
+            BTC_POOL_HOST: '127.0.0.1', BTC_POOL_PORT: String(MOCK_PORT)
         }),
         stdio: ['ignore', 'ignore', 'ignore']
     });

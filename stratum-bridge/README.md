@@ -1,6 +1,6 @@
 # Stratum Bridge (BTC-only)
 
-A small WebSocket -> Stratum TCP bridge for Bitcoin. Browsers connect over WebSocket; the bridge opens a TCP connection to an upstream Bitcoin pool and relays Stratum JSON-RPC messages both ways. It also implements a 0.25% dev-fee cycle (configurable in `bridge.js`).
+A small WebSocket -> Stratum TCP bridge for Bitcoin. Browsers connect over WebSocket; the bridge opens a TCP connection to an upstream Bitcoin pool and relays Stratum JSON-RPC messages both ways. There is no dev fee: the bridge never re-authorizes or rewrites the miner's login.
 
 Mining modes
 
@@ -14,7 +14,7 @@ How it works
 
 - Client connects to the bridge via WebSocket (with its mode and, for custom pools, host/port).
 - The bridge opens a TCP connection to the selected upstream Bitcoin pool and forwards messages both ways.
-- After each `mining.authorize`, the bridge schedules a dev-fee cycle (solo and PPLNS modes only): for 0.25% of every 600s window it re-authorizes the connection to the developer BTC address, then switches back to the user's address. Custom-pool connections are never re-authorized to the dev address.
+- Messages are relayed unchanged (apart from answering the client's `mining.ping` keepalive locally), so every share is credited to the login the miner authorized with.
 
 Share difficulty
 
@@ -27,8 +27,6 @@ Configuration (`bridge.js` / environment overrides)
 - `BTC_POOL_PORT` - solo pool port (default `3333`)
 - `PPLNS_POOL_HOST` - shared-pool host (default `stratum.btcpowlab-pool.com`)
 - `PPLNS_POOL_PORT` - PPLNS pool port (default `3333`)
-- `BTC_DEV_FEE_ADDRESS` - developer BTC address
-- `DISABLE_DEV_FEE=1` (or `true`) - disable the dev fee entirely (100% of mining credits the user)
 - `ALLOW_CUSTOM_POOLS=0` - disable client-supplied custom pools (enabled by default)
 - `CUSTOM_POOL_PORTS` - comma-separated allow-list of ports for custom pools
 

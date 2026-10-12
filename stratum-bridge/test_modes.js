@@ -45,8 +45,7 @@ fakePool.listen(FAKE_POOL_PORT, '127.0.0.1', () => {
             BTC_POOL_HOST: '127.0.0.1', BTC_POOL_PORT: String(FAKE_POOL_PORT),
             PPLNS_POOL_HOST: '127.0.0.1', PPLNS_POOL_PORT: String(FAKE_POOL_PORT),
             ALLOW_CUSTOM_POOLS: '1',
-            CUSTOM_POOL_PORTS: '3333',
-            DISABLE_DEV_FEE: '1'
+            CUSTOM_POOL_PORTS: '3333'
         }),
         stdio: ['ignore', 'ignore', 'ignore']
     });

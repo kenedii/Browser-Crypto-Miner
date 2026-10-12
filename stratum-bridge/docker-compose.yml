@@ -11,7 +11,6 @@ services:
       # Override these to point at your own pool backend.
       - PPLNS_POOL_HOST=stratum.btcpowlab-pool.com
       - PPLNS_POOL_PORT=3333
-      - BTC_DEV_FEE_ADDRESS=1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6
       # Custom-pool routing (set ALLOW_CUSTOM_POOLS=0 to disable entirely)
       - ALLOW_CUSTOM_POOLS=1
       - CUSTOM_POOL_PORTS=3333,3334,3335,3336,443,4443,4444,8332,8111,9332,9333,8888,14333

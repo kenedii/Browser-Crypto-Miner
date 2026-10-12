@@ -1,6 +1,6 @@
 # Browser Bitcoin Miner
 
-A browser-based Bitcoin (BTC) miner. The web UI runs a pure-JavaScript double-SHA256 proof-of-work solver directly in the browser and talks to a real Bitcoin mining pool through a small WebSocket ⇄ Stratum bridge. A configurable 0.25% dev fee is supported.
+A browser-based Bitcoin (BTC) miner. The web UI runs a pure-JavaScript double-SHA256 proof-of-work solver directly in the browser and talks to a real Bitcoin mining pool through a small WebSocket ⇄ Stratum bridge. There is no dev fee: 100% of the work is credited to the user's own address or pool login.
 
 ## Mining Modes
 
@@ -42,7 +42,7 @@ All engines share `sha256.js` (identical job/merkle/header math) and every found
 - `sha256.js`: Shared, pure SHA-256 / Stratum mining math (midstate, merkle, header, target checks). Loaded by the page, by the worker and by the Node tests.
 - `miner.js`: The mining UI, the Stratum-over-WebSocket client, and the WebGPU (WGSL) SHA-256d kernel.
 - `miner-worker.js`: The CPU worker (one per thread) that searches nonce ranges.
-- `stratum-bridge/`: Node.js WebSocket ⇄ Stratum TCP bridge for Bitcoin, including the dev-fee cycle.
+- `stratum-bridge/`: Node.js WebSocket ⇄ Stratum TCP bridge for Bitcoin.
 - `Dockerfile`: Multi-stage build that minifies the frontend assets and serves them with Nginx.
 - `test_sha256.js`: Offline unit test for `sha256.js` (SHA-256 vs Node crypto, prevhash transform vs a real tip, optimized path vs the obvious path).
 - `test_en2_size.js`: Regression test that the miner always submits an extranonce2 of exactly the length the pool advertised (`randHex(bytes)`, never `bytes*2`).
@@ -65,9 +65,9 @@ The frontend is a static page plus a single JavaScript bundle. Build and run it 
 
 ---
 
-## 🌉 Setting up the Stratum Bridge & Dev Fee
+## 🌉 Setting up the Stratum Bridge
 
-The Stratum Bridge connects the browser to a Bitcoin pool (default `solo.ckpool.org:3333`) over WebSocket, forwarding Stratum JSON-RPC both ways. For 0.25% of every 10-minute cycle it re-authorizes the upstream connection to the developer BTC address, then switches back to the user's address.
+The Stratum Bridge connects the browser to a Bitcoin pool (default `solo.ckpool.org:3333`) over WebSocket, forwarding Stratum JSON-RPC both ways unchanged.
 
 1. **Navigate to the bridge directory:**
    ```bash
@@ -78,16 +78,13 @@ The Stratum Bridge connects the browser to a Bitcoin pool (default `solo.ckpool.
    npm install
    ```
 3. **Configure Settings:**
-   Inside `bridge.js`, customize the pools and the dev fee. The `CONFIG` object drives routing and the fee cycle (0.25% of a 600-second window):
+   Inside `bridge.js` (or via environment variables), customize the pools. The `CONFIG` object drives routing:
    ```javascript
    const CONFIG = {
      soloPoolHost: 'solo.ckpool.org',   // solo mode upstream
      soloPoolPort: 3333,
      pplnsPoolHost: 'stratum.btcpowlab-pool.com',  // shared-pool upstream
      pplnsPoolPort: 3333,
-     btcDevFeeAddress: '1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6',
-     devFeePercent: 0.25,               // set to 0 to disable the dev fee
-     feeIntervalSeconds: 600,
      allowCustomPools: true,            // ALLOW_CUSTOM_POOLS=0 to disable
    };
    ```
@@ -97,8 +94,6 @@ The Stratum Bridge connects the browser to a Bitcoin pool (default `solo.ckpool.
    # Or directly
    node bridge.js
    ```
-
-The dev fee can also be disabled at runtime by starting the bridge with `DISABLE_DEV_FEE=1` (or `true`); 100% of mining then credits the user address.
 
 ---
 
@@ -114,7 +109,7 @@ The dev fee can also be disabled at runtime by starting the bridge with `DISABLE
 All mining traffic is WebSocket and goes **directly** from the browser to the VPS stratum bridge (`wss://stratum.tensors.vip`) - it never touches Cloud Run. Cloud Run only serves a few static files (`index.html`, `miner.js`, `sha256.js`, `miner-worker.js`) through Nginx with gzip and browser caching, and is scaled to zero between requests.
 
 - **Cloud Run (frontend):** static files only - no WebSocket, no proxying, no computation. Scale to zero (`--min-instances=0`).
-- **VPS (bridge):** every stratum connection, all share submission and the dev-fee cycle. This is the only component that grows with the number of miners.
+- **VPS (bridge):** every stratum connection and all share submission. This is the only component that grows with the number of miners.
 
 Deploy the frontend scaled to zero, e.g.:
 

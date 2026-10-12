@@ -117,8 +117,8 @@ function runMinerApp() {
         </div>
 
         <div class="form-group" id="gpu-intensity-group" style="margin-bottom: 20px; display: none;">
-            <label for="intensity" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">GPU Intensity (nonces per frame: <span id="intensity-val">131072</span>)</label>
-            <input type="range" id="intensity" min="64" max="65535" value="2048" step="64" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px;">
+            <label for="intensity" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">GPU Intensity (nonces per batch: <span id="intensity-val">1,048,576</span>)</label>
+            <input type="range" id="intensity" min="64" max="65535" value="16384" step="64" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px;">
         </div>
 
         <div class="stats" style="margin-top: 24px; padding-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.1); display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
@@ -406,7 +406,7 @@ function runMinerApp() {
         let nonce = P.tail.w + gid.x;
 
         var w2 : array<u32, 16>;
-        w2[0] = P.tail.x; w2[1] = P.tail.y; w2[2] = P.tail.z; w2[3] = nonce;
+        w2[0] = P.tail.x; w2[1] = P.tail.y; w2[2] = P.tail.z; w2[3] = bswap32(nonce);
         w2[4] = 0x80000000u;
         for (var i = 5u; i < 15u; i = i + 1u) { w2[i] = 0u; }
         w2[15] = 640u;
@@ -992,7 +992,7 @@ function runMinerApp() {
             ]
         });
 
-        gpu = { uniform: uniform, count: count, nonces: nonces, read: read, ctx: null, en2: '00000000', baseNonce: 0, frame: 0 };
+        gpu = { uniform: uniform, count: count, nonces: nonces, read: read, ctx: null, en2: '00000000', baseNonce: 0, running: false };
         return gpu;
     }
 
@@ -1013,63 +1013,77 @@ function runMinerApp() {
         gpu.en2 = randHex(window.stratumExtranonce2Size || 4);
         gpu.baseNonce = (Math.random() * 0xffffffff) >>> 0;
         prepareGpuContext();
-        if (!gpu.frame) runGpuLoop();
+        if (!gpu.running) runGpuLoop();
     }
 
+    // Continuous GPU search. Each pass dispatches one batch and awaits its
+    // readback, then immediately starts the next - it is NOT tied to
+    // requestAnimationFrame (which capped the GPU at ~60 batches/s and paused
+    // entirely in background tabs). Every batch snapshots the job, extranonce2
+    // and context it was hashed against, so a share found while a new job
+    // arrives is still verified and submitted against the job it belongs to.
     async function runGpuLoop() {
-        if (!isMining || !gpu) return;
+        if (!gpu || gpu.running) return;
+        gpu.running = true;
         try {
-            if (!gpu.ctx || !window.currentStratumJob) {
-                gpu.frame = requestAnimationFrame(runGpuLoop);
-                return;
-            }
-            const wg = Math.max(1, Math.min(65535, parseInt(elements.intensity.value, 10) || 2048));
-            const span = wg * 64;
+            while (isMining && gpu) {
+                if (!gpu.ctx || !window.currentStratumJob) {
+                    await new Promise(r => setTimeout(r, 200));
+                    continue;
+                }
+                const wg = Math.max(1, Math.min(65535, parseInt(elements.intensity.value, 10) || 16384));
+                const span = wg * 64;
 
-            // Roll extranonce2 (and rebuild the midstate) when the 32-bit nonce
-            // space is exhausted.
-            if (gpu.baseNonce > 0xffffffff - span) {
-                gpu.baseNonce = (Math.random() * 0xffffffff) >>> 0;
-                gpu.en2 = randHex(window.stratumExtranonce2Size || 4);
-                prepareGpuContext();
-            }
+                // Roll extranonce2 (and rebuild the midstate) when the 32-bit
+                // nonce space is exhausted.
+                if (gpu.baseNonce > 0xffffffff - span) {
+                    gpu.baseNonce = (Math.random() * 0xffffffff) >>> 0;
+                    gpu.en2 = randHex(window.stratumExtranonce2Size || 4);
+                    prepareGpuContext();
+                }
 
-            device.queue.writeBuffer(gpu.uniform, 64, new Uint32Array([gpu.ctx.w0, gpu.ctx.ntime, gpu.ctx.nbits, gpu.baseNonce >>> 0]));
-            device.queue.writeBuffer(gpu.count, 0, new Uint32Array([0]));
+                const snap = { ctx: gpu.ctx, en2: gpu.en2, job: window.currentStratumJob };
+                device.queue.writeBuffer(gpu.uniform, 0, snap.ctx.midstate);
+                device.queue.writeBuffer(gpu.uniform, 32, snap.ctx.target);
+                device.queue.writeBuffer(gpu.uniform, 64, new Uint32Array([snap.ctx.w0, snap.ctx.ntime, snap.ctx.nbits, gpu.baseNonce >>> 0]));
+                device.queue.writeBuffer(gpu.count, 0, new Uint32Array([0]));
 
-            const enc = device.createCommandEncoder();
-            const pass = enc.beginComputePass();
-            pass.setPipeline(pipeline);
-            pass.setBindGroup(0, bindGroup);
-            pass.dispatchWorkgroups(wg);
-            pass.end();
-            enc.copyBufferToBuffer(gpu.count, 0, gpu.read, 0, 4);
-            enc.copyBufferToBuffer(gpu.nonces, 0, gpu.read, 4, GPU_MAX_FOUND * 4);
-            device.queue.submit([enc.finish()]);
-            totalHashes += span;
+                const enc = device.createCommandEncoder();
+                const pass = enc.beginComputePass();
+                pass.setPipeline(pipeline);
+                pass.setBindGroup(0, bindGroup);
+                pass.dispatchWorkgroups(wg);
+                pass.end();
+                enc.copyBufferToBuffer(gpu.count, 0, gpu.read, 0, 4);
+                enc.copyBufferToBuffer(gpu.nonces, 0, gpu.read, 4, GPU_MAX_FOUND * 4);
+                device.queue.submit([enc.finish()]);
+                gpu.baseNonce = (gpu.baseNonce + span) >>> 0;
 
-            await gpu.read.mapAsync(GPUMapMode.READ);
-            const results = new Uint32Array(gpu.read.getMappedRange().slice(0));
-            gpu.read.unmap();
-            const n = Math.min(results[0], GPU_MAX_FOUND);
-            for (let i = 0; i < n; i++) {
-                const nonce = results[1 + i];
-                // Re-verify on the CPU path before submitting.
-                if (SHA256Crypto.nonceIsValid(gpu.ctx, nonce)) {
-                    const shareDiff = SHA256Crypto.hashDifficulty(SHA256Crypto.hashNonce(gpu.ctx, nonce));
-                    offerShare(window.currentStratumJob.job_id, gpu.en2, window.currentStratumJob.ntime,
-                        (nonce >>> 0).toString(16).padStart(8, '0'), shareDiff);
+                await gpu.read.mapAsync(GPUMapMode.READ);
+                const results = new Uint32Array(gpu.read.getMappedRange().slice(0));
+                gpu.read.unmap();
+                totalHashes += span;
+
+                const n = Math.min(results[0], GPU_MAX_FOUND);
+                for (let i = 0; i < n; i++) {
+                    const nonce = results[1 + i];
+                    // Re-verify on the CPU path (against the batch's own job) before submitting.
+                    if (SHA256Crypto.nonceIsValid(snap.ctx, nonce)) {
+                        const shareDiff = SHA256Crypto.hashDifficulty(SHA256Crypto.hashNonce(snap.ctx, nonce));
+                        offerShare(snap.job.job_id, snap.en2, snap.job.ntime,
+                            (nonce >>> 0).toString(16).padStart(8, '0'), shareDiff);
+                    }
                 }
             }
-            gpu.baseNonce = (gpu.baseNonce + span) >>> 0;
-            gpu.frame = requestAnimationFrame(runGpuLoop);
         } catch (e) {
             console.error('GPU loop error', e);
             elements.status.textContent = 'GPU error: ' + e.message;
-            isMining = false;
+            logLine('GPU engine stopped: ' + e.message, 'error');
+        } finally {
+            if (gpu) gpu.running = false;
         }
     }
-    
+
     // Legacy single thread loop removed, replaced by Web Workers
 
     function updateStats() {
@@ -1192,7 +1206,7 @@ function runMinerApp() {
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
       stopKeepalive();
       cancelAnimationFrame(animationFrameId);
-      if (gpu && gpu.frame) { cancelAnimationFrame(gpu.frame); gpu.frame = 0; }
+      /* the GPU loop exits on its own once isMining is false */
 
       // Stop Workers
       workers.forEach(w => w.terminate());

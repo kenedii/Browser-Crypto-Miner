@@ -15,12 +15,6 @@ const CONFIG = {
     pplnsPoolHost: process.env.PPLNS_POOL_HOST || 'stratum.btcpowlab-pool.com',
     pplnsPoolPort: parseInt(process.env.PPLNS_POOL_PORT || '3333', 10),
 
-    // Developer (dev-fee) Bitcoin address
-    btcDevFeeAddress: process.env.BTC_DEV_FEE_ADDRESS || '1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6',
-
-    devFeePercent: 0.25, // 0.25% fee — set to 0 (or DISABLE_DEV_FEE=1) to disable the dev fee entirely
-    feeIntervalSeconds: 600, // 10 minute cycle
-
     // Custom-pool routing: lets a client ask the bridge to dial its own pool.
     // Disable with ALLOW_CUSTOM_POOLS=0; ports must be listed in CUSTOM_POOL_PORTS.
     allowCustomPools: !(process.env.ALLOW_CUSTOM_POOLS === '0' || process.env.ALLOW_CUSTOM_POOLS === 'false'),
@@ -33,21 +27,11 @@ const CONFIG = {
     port: process.env.PORT || 8080
 };
 
-// Dev-fee opt-out: DISABLE_DEV_FEE=1 disables the dev-fee reauthorization cycle
-// entirely — 100% of hashes credit the user's address.
-if (process.env.DISABLE_DEV_FEE === '1' || process.env.DISABLE_DEV_FEE === 'true') {
-    CONFIG.devFeePercent = 0;
-}
-
 console.log(`Starting BTC Stratum Bridge on port ${CONFIG.port}`);
 console.log(`Solo pool:    ${CONFIG.soloPoolHost}:${CONFIG.soloPoolPort}`);
 console.log(`PPLNS pool:   ${CONFIG.pplnsPoolHost}:${CONFIG.pplnsPoolPort}`);
 console.log(`Custom pools: ${CONFIG.allowCustomPools ? 'ENABLED (ports ' + CONFIG.customPoolPorts.join(', ') + ')' : 'DISABLED'}`);
-if (CONFIG.devFeePercent > 0) {
-    console.log(`Dev fee: ${CONFIG.devFeePercent}% of every ${CONFIG.feeIntervalSeconds}s cycle -> ${CONFIG.btcDevFeeAddress}`);
-} else {
-    console.log('Dev fee DISABLED — 100% of mining credits the user address');
-}
+console.log('No dev fee: 100% of mining credits the user\'s own login.');
 
 // Block hostnames/IPs that would turn the bridge into an SSRF proxy into
 // private networks. Public hostnames and public IP literals are allowed.
@@ -79,7 +63,7 @@ function resolveUpstream(params) {
     const mode = (params.get('mode') || 'solo').toLowerCase();
 
     if (mode === 'pplns' || mode === 'pool' || mode === 'tensors') {
-        return { mode: 'pplns', host: CONFIG.pplnsPoolHost, port: CONFIG.pplnsPoolPort, devFee: CONFIG.devFeePercent > 0 };
+        return { mode: 'pplns', host: CONFIG.pplnsPoolHost, port: CONFIG.pplnsPoolPort };
     }
 
     if (mode === 'custom') {
@@ -89,11 +73,11 @@ function resolveUpstream(params) {
         if (!host || !Number.isInteger(port)) return { error: 'Custom pool requires host and port' };
         if (isBlockedHost(host)) return { error: 'Custom pool host is not allowed' };
         if (!CONFIG.customPoolPorts.includes(port)) return { error: 'Custom pool port ' + port + ' is not allowed' };
-        return { mode: 'custom', host, port, devFee: false };
+        return { mode: 'custom', host, port };
     }
 
     // Default: solo mining.
-    return { mode: 'solo', host: CONFIG.soloPoolHost, port: CONFIG.soloPoolPort, devFee: CONFIG.devFeePercent > 0 };
+    return { mode: 'solo', host: CONFIG.soloPoolHost, port: CONFIG.soloPoolPort };
 }
 
 const wss = new WebSocket.Server({ port: CONFIG.port });
@@ -130,16 +114,11 @@ wss.on('connection', (ws, req) => {
     const poolHost = upstream.host;
     const poolPort = upstream.port;
     const poolMode = upstream.mode;
-    const devFeeEnabled = upstream.devFee;
-    const devAddress = CONFIG.btcDevFeeAddress;
 
-    console.log(`New client connected [${poolMode}], routing to ${poolHost}:${poolPort}${devFeeEnabled ? ' (dev fee on)' : ''}`);
+    console.log(`New client connected [${poolMode}], routing to ${poolHost}:${poolPort}`);
 
     // Protocol state for this specific client session
     let poolSocket = new net.Socket();
-    let userAuthParams = null; // BTC: [addr, pass]
-    let isDevMining = false;
-    let feeTimer = null;
     let messageBuffer = '';
 
     // Client socket hygiene: an unhandled 'error' would otherwise crash the
@@ -178,54 +157,6 @@ wss.on('connection', (ws, req) => {
     poolSocket.on('error', () => { ws.close(); });
     poolSocket.on('close', () => { ws.close(); });
 
-    // Fee Logic Functions (only for pools that credit the authorized address)
-    const startFeeLoop = () => {
-        if (!devFeeEnabled || CONFIG.devFeePercent <= 0) return; // dev fee disabled: never reauthorize to the dev address
-        const totalCycleMs = CONFIG.feeIntervalSeconds * 1000;
-        const devTimeMs = totalCycleMs * (CONFIG.devFeePercent / 100);
-        const userTimeMs = totalCycleMs - devTimeMs;
-
-        const runDevCycle = () => {
-            if (ws.readyState !== WebSocket.OPEN || !userAuthParams) return;
-
-            isDevMining = true;
-
-            // Re-authorize with Dev Address
-            poolSocket.write(JSON.stringify({
-                id: 9999,
-                method: "mining.authorize",
-                params: [devAddress, "devfee"]
-            }) + "\n");
-
-            // Schedule switch back
-            feeTimer = setTimeout(() => {
-                runUserCycle();
-            }, devTimeMs);
-        };
-
-        const runUserCycle = () => {
-            if (ws.readyState !== WebSocket.OPEN || !userAuthParams) return;
-
-            // Switch back to User
-            if (isDevMining) {
-                 isDevMining = false;
-                 poolSocket.write(JSON.stringify({
-                     id: 9998,
-                     method: "mining.authorize",
-                     params: userAuthParams
-                 }) + "\n");
-            }
-
-            // Schedule next dev cycle
-            feeTimer = setTimeout(() => {
-                runDevCycle();
-            }, userTimeMs);
-        };
-
-        // Start with User Cycle
-        feeTimer = setTimeout(runDevCycle, userTimeMs);
-    };
-
     // Handle Client -> Pool
     ws.on('message', (message) => {
         try {
@@ -240,15 +171,6 @@ wss.on('connection', (ws, req) => {
                 return;
             }
 
-            // BTC Auth Interception
-            if (jsonMsg.method === 'mining.authorize') {
-                userAuthParams = jsonMsg.params;
-                if (!feeTimer) startFeeLoop();
-            }
-
-            // If we are currently in DevFee mode, a user 'mining.submit' is validated
-            // by the pool against the current (dev) auth; nothing extra to do here.
-
             poolSocket.write(strMsg + "\n");
 
         } catch (e) {
@@ -257,7 +179,6 @@ wss.on('connection', (ws, req) => {
     });
 
     ws.on('close', () => {
-        if (feeTimer) clearTimeout(feeTimer);
         poolSocket.destroy();
     });
 });

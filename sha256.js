@@ -214,8 +214,11 @@
         var version = parseInt(job.version, 16) >>> 0;
 
         // First 64 header bytes: version(4) + prevhash(32) + merkle[0..27]
+        // Bitcoin serializes version, ntime, nbits and nonce LITTLE-endian in the
+        // 80-byte header, while SHA-256 reads big-endian words - so each of those
+        // header words is the byte-swap of the numeric value from Stratum.
         var w = new Uint32Array(64);
-        w[0] = version;
+        w[0] = bswap32(version);
         for (i = 0; i < 8; i++) w[1 + i] = beWord(prevhash, i * 4);
         for (i = 0; i < 7; i++) w[9 + i] = beWord(merkle, i * 4);
         var h = new Uint32Array(IV);
@@ -227,8 +230,8 @@
             prevhash: prevhash,
             version: version,
             w0: beWord(merkle, 28),                 // header bytes 64..67
-            ntime: parseInt(job.ntime, 16) >>> 0,
-            nbits: parseInt(job.nbits, 16) >>> 0,
+            ntime: bswap32(parseInt(job.ntime, 16) >>> 0),   // header word (LE bytes)
+            nbits: bswap32(parseInt(job.nbits, 16) >>> 0),   // header word (LE bytes)
             target: computeTargetWords(difficulty),
             difficulty: difficulty
         };
@@ -246,7 +249,7 @@
         var ms = ctx.midstate;
 
         // Second header block: merkle tail | ntime | nbits | nonce | 0x80 .. | len
-        w[0] = ctx.w0; w[1] = ctx.ntime; w[2] = ctx.nbits; w[3] = nonce >>> 0;
+        w[0] = ctx.w0; w[1] = ctx.ntime; w[2] = ctx.nbits; w[3] = bswap32(nonce >>> 0);
         w[4] = 0x80000000;
         for (i = 5; i < 15; i++) w[i] = 0;
         w[15] = 640; // 80 bytes * 8 bits
@@ -312,12 +315,12 @@
     // share verifier).
     function headerForNonce(ctx, nonce) {
         var header = new Uint8Array(80);
-        putU32(header, 0, ctx.version);
+        putU32(header, 0, bswap32(ctx.version));
         header.set(ctx.prevhash, 4);
         header.set(ctx.merkleRoot, 36);
         putU32(header, 68, ctx.ntime);
         putU32(header, 72, ctx.nbits);
-        putU32(header, 76, nonce >>> 0);
+        putU32(header, 76, bswap32(nonce >>> 0));
         return header;
     }
 

@@ -1,7 +1,7 @@
 {
   "name": "stratum-bridge",
   "version": "1.0.0",
-  "description": "WebSocket to Stratum TCP Bridge with DevFee",
+  "description": "WebSocket to Stratum TCP Bridge",
   "main": "bridge.js",
   "scripts": {
     "start": "node bridge.js",
