@@ -2,7 +2,10 @@ services:
   bridge:
     build: .
     restart: unless-stopped
+    # Sized for a 1 GB VPS: the bridge only relays small JSON lines, so ~50 MB idle.
+    mem_limit: 256m
     environment:
+      - NODE_OPTIONS=--max-old-space-size=160
       - PORT=8080
       # ---- Bitcoin (double-SHA-256d) --------------------------------------
       # Solo pool (miner keeps the full block reward if they solve a block)
@@ -48,6 +51,7 @@ services:
   caddy:
     image: caddy:2
     restart: unless-stopped
+    mem_limit: 128m
     depends_on:
       - bridge
     ports:
