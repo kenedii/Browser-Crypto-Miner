@@ -36,17 +36,38 @@ services:
       - MERGED_POOL_HOST=ltc.f2pool.com
       - MERGED_POOL_PORT=8888
       # ---- Monero (RandomX) -----------------------------------------------
+      # Shared-pool mode (XMR_PPLNS_*) goes to the local P2Pool node below; solo stays on supportxmr.
       # xmrig "login / job / submit" protocol. A browser CPU is far too slow to
       # beat a pool's minimum share difficulty on Monero; treat it as a lottery.
       - XMR_POOL_HOST=pool.supportxmr.com
       - XMR_POOL_PORT=3333
-      - XMR_PPLNS_POOL_HOST=pool.supportxmr.com
+      - XMR_PPLNS_POOL_HOST=${XMR_PPLNS_POOL_HOST:-pool.supportxmr.com}
       - XMR_PPLNS_POOL_PORT=3333
       # Custom-pool routing (set ALLOW_CUSTOM_POOLS=0 to disable entirely)
       - ALLOW_CUSTOM_POOLS=1
       - CUSTOM_POOL_PORTS=3333,3334,3335,3336,443,4443,4444,5555,7777,8080,8332,8111,8888,9000,9332,9333,10001,14333,18081
     expose:
       - "8080"
+
+  p2pool:
+    # Optional: only started with `--profile p2pool` (see README), so the other coins
+    # never depend on it. Enable by setting XMR_PPLNS_POOL_HOST=p2pool in .env too.
+    profiles: ["p2pool"]
+    build: ./p2pool
+    restart: unless-stopped
+    # Light mode keeps the RandomX cache at ~256 MiB; on a 1 GB VPS keep swap enabled.
+    mem_limit: 640m
+    environment:
+      # Required: default payout address (miners log in with their own address).
+      - P2POOL_WALLET=${P2POOL_WALLET:-}
+      # Remote monerod used for block templates (needs RPC + ZMQ reachable).
+      - MONERO_NODE_HOST=${MONERO_NODE_HOST:-p2pmd.xmrvsbeast.com}
+      - MONERO_RPC_PORT=${MONERO_RPC_PORT:-18081}
+      - MONERO_ZMQ_PORT=${MONERO_ZMQ_PORT:-18083}
+      # mini (default, lowest share difficulty), nano or main
+      - P2POOL_SIDECHAIN=${P2POOL_SIDECHAIN:-mini}
+    expose:
+      - "3333"
 
   caddy:
     image: caddy:2

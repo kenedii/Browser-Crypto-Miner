@@ -101,3 +101,21 @@ docker run -p 8080:8080 btc-stratum-bridge
 - The bridge forwards JSON-RPC lines and appends newlines; it expects miners that follow the usual Bitcoin stratum formatting.
 - It only parses the client's query string (`coin`, `mode`, and `host`/`port` for custom pools); it never has to understand the mining protocol, because whatever a pool sends is forwarded to the client unchanged. That is why the same relay serves the xmrig Monero dialect without special cases.
 - To exercise the frontend against a local bridge, append `?bridge=ws://localhost:8080` to the page URL (see the "Local Testing" section of `crypto-frontend/README.md`); without it the page keeps using the deployed `wss://stratum.tensors.vip`.
+
+## Monero shared-pool mode via P2Pool (optional)
+
+P2Pool is a decentralized Monero pool (no operator, payouts straight from the coinbase). The compose file has an optional `p2pool` service that runs the official binary in `--light-mode` against a **remote** monerod, so no blockchain is stored on the VPS. It needs a node with RPC and ZMQ reachable (default: `p2pmd.xmrvsbeast.com`, RPC 18081, ZMQ 18083).
+
+```bash
+cd stratum-bridge
+cat > .env <<ENV
+P2POOL_WALLET=<a Monero address you control - default payout, miners log in with their own>
+XMR_PPLNS_POOL_HOST=p2pool
+COMPOSE_PROFILES=p2pool
+# optional: MONERO_NODE_HOST, MONERO_RPC_PORT, MONERO_ZMQ_PORT, P2POOL_SIDECHAIN=mini|nano|main
+ENV
+docker compose up -d --build
+docker compose logs -f p2pool   # look for "SideChain" / "StratumServer" lines and a connected peer count
+```
+
+Without that `.env` the Monero "Shared Pool" mode keeps using `pool.supportxmr.com` and nothing else changes. Memory: P2Pool in light mode is the heaviest service (~300-600 MB); on a 1 GB VPS keep the 1 GB swap file, or use a 2 GB VPS.

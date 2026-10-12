@@ -303,7 +303,7 @@ function runMinerApp() {
             placeholder: 'Enter your Monero address (4... standard, 8... subaddress)',
             loginHint: 'your XMR address',
             soloPool: 'pool.supportxmr.com',
-            sharedPool: 'pool.supportxmr.com',
+            sharedPool: 'P2Pool (decentralized)',
             // Standard (4...) and subaddress (8...) are 95 chars, integrated 106.
             pattern: /^[48][1-9A-HJ-NP-Za-km-z]{93,105}$/,
             invalid: 'Invalid Monero address (expected 95/106 base58 chars starting with 4 or 8).'
@@ -334,7 +334,7 @@ function runMinerApp() {
         ],
         XMR: [
             'Solo - your own address pays out (pool.supportxmr.com)',
-            'Shared Pool (pool.supportxmr.com) - credited to your address',
+            'Shared Pool - P2Pool (decentralized, no operator) - paid to your address',
             'Merged (LTC + DOGE) - scrypt only, not Monero',
             'Custom Pool - mine for your own pool'
         ]
