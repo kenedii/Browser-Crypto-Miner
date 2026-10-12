@@ -203,6 +203,14 @@
     // until the VM has been re-keyed with that seed (once per epoch).
     function normalizeJob(params) {
         if (!params) return null;
+        // Idempotent: the page normalizes the pool's job once and hands that result
+        // to the worker, which normalizes again. Re-parsing a normalized job would
+        // mangle its BigInt target (String(target) is decimal, not the pool's hex),
+        // so an already-normalized job is returned as-is.
+        if (typeof params.target === 'bigint' && params.blob && typeof params.blob !== 'string' &&
+            typeof params.blob.length === 'number' && params.blob.length >= NONCE_OFFSET + NONCE_SIZE) {
+            return params;
+        }
         var blobHex = params.blob || params.blocktemplate_blob || null;
         if (!blobHex) return null;
 
