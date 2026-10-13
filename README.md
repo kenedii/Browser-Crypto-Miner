@@ -32,7 +32,7 @@ Everything the page hashes is a genuine candidate for a real block on a real net
 - 🪶 **Light to run.** The frontend is a few static files. The bridge is a single Node process that fits in a 1 GB VPS.
 - 🧪 **Honest by design.** The miner only ever submits a share that actually clears the pool's bar. It never fabricates one.
 
-> **Be realistic.** A browser tab will not make you money. At today's network difficulties, finding a block from a tab is a lottery ticket measured in millions of years. This is a research and engineering demo of what the web platform can do, built in collaboration with a Bitcoin mining pool research lab.
+> **Be realistic.** A browser tab will not make you money. At today's network difficulties, finding a block from a tab is a lottery ticket measured in millions of years. This is a research and engineering demo of what a web browser can do.
 
 ## Features
 
@@ -88,7 +88,7 @@ flowchart LR
 ```
 
 - **Cloud Run** only serves a handful of static files through nginx and scales to zero. No mining traffic ever touches it.
-- **The VPS** runs the bridge, which is the only part that grows with the number of miners. It relays messages unchanged (it only answers the client's `mining.ping` locally), so it holds no keys and takes no cut.
+- **A Lightweight VPS** runs the bridge, which is the only part that grows with the number of miners. It relays messages unchanged (it only answers the client's `mining.ping` locally), so it holds no keys and takes no cut.
 
 ## Quick start
 
@@ -134,7 +134,7 @@ node tests/test_en2_size.js                # strict-pool extranonce2 regression
 
 ## Deploying
 
-### The bridge (any small VPS)
+### The bridge (any small VPS, 2)
 
 ```bash
 git clone https://github.com/kenedii/Browser-Crypto-Miner.git /opt/bcm
