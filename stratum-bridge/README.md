@@ -89,18 +89,18 @@ docker run -p 8080:8080 btc-stratum-bridge
 
 ## Tests
 
-- `node test_modes.js` - verifies coin/mode routing: **every** coin (BTC / LTC / DOGE / XMR) in **both** real modes (solo, pplns) dials the upstream that belongs to it (eight separate mock pools, so a coin or mode mix-up cannot hide behind a shared connection counter), the pool's reply is relayed back to the client for the xmrig dialect as well as the Bitcoin one, a bare `?coin=BTC` defaults to solo, an unknown coin is rejected, custom mode rejects blocked hosts and disallowed ports, and all four default upstream hostnames are still present. Local mocks only.
-- `node test_share_e2e.js` - runs the bridge against a mock pool that hands out a **real** captured Bitcoin job at a low difficulty and then **independently verifies** the submitted share (Node crypto + real block-header byte order). Proves the whole job -> hash -> submit pipeline, including the stratum prevhash transform and the `<address>.browser` login.
-- `node test_en2_size.js` - wire-level regression for the extranonce2 length bug: a strict mock pool (like btcpowlab) advertises a 4-byte extranonce2 and rejects any wrong-sized `en2` with `[20, "extranonce2 must contain exactly 4 bytes"]`. Two clients submit a real share through the bridge - the correct 4-byte `en2` is **accepted**, the doubled 8-byte one is **rejected**.
-- `node test_local.js` - starts a stub Bitcoin stratum server and verifies the bridge relays messages end-to-end. The stub is a local mock only; it performs no real network mining.
-- `node test_local_btc.js` - a quick subscribe check against a bridge running on `localhost:8080`.
-- `node test_live_mining.js` - **performs real network work**: connects to `wss://stratum.tensors.vip` in solo and pplns modes, negotiates difficulty and mines the real jobs for ~20s each.
+- `node tests/test_modes.js` - verifies coin/mode routing: **every** coin (BTC / LTC / DOGE / XMR) in **both** real modes (solo, pplns) dials the upstream that belongs to it (eight separate mock pools, so a coin or mode mix-up cannot hide behind a shared connection counter), the pool's reply is relayed back to the client for the xmrig dialect as well as the Bitcoin one, a bare `?coin=BTC` defaults to solo, an unknown coin is rejected, custom mode rejects blocked hosts and disallowed ports, and all four default upstream hostnames are still present. Local mocks only.
+- `node tests/test_share_e2e.js` - runs the bridge against a mock pool that hands out a **real** captured Bitcoin job at a low difficulty and then **independently verifies** the submitted share (Node crypto + real block-header byte order). Proves the whole job -> hash -> submit pipeline, including the stratum prevhash transform and the `<address>.browser` login.
+- `node tests/test_en2_size.js` - wire-level regression for the extranonce2 length bug: a strict mock pool (like btcpowlab) advertises a 4-byte extranonce2 and rejects any wrong-sized `en2` with `[20, "extranonce2 must contain exactly 4 bytes"]`. Two clients submit a real share through the bridge - the correct 4-byte `en2` is **accepted**, the doubled 8-byte one is **rejected**.
+- `node tests/test_local.js` - starts a stub Bitcoin stratum server and verifies the bridge relays messages end-to-end. The stub is a local mock only; it performs no real network mining.
+- `node tests/test_local_btc.js` - a quick subscribe check against a bridge running on `localhost:8080`.
+- `node tests/test_live_mining.js` - **performs real network work**: connects to `wss://stratum.tensors.vip` in solo and pplns modes, negotiates difficulty and mines the real jobs for ~20s each.
 
 ## Notes
 
 - The bridge forwards JSON-RPC lines and appends newlines; it expects miners that follow the usual Bitcoin stratum formatting.
 - It only parses the client's query string (`coin`, `mode`, and `host`/`port` for custom pools); it never has to understand the mining protocol, because whatever a pool sends is forwarded to the client unchanged. That is why the same relay serves the xmrig Monero dialect without special cases.
-- To exercise the frontend against a local bridge, append `?bridge=ws://localhost:8080` to the page URL (see the "Local Testing" section of `crypto-frontend/README.md`); without it the page keeps using the deployed `wss://stratum.tensors.vip`.
+- To exercise the frontend against a local bridge, append `?bridge=ws://localhost:8080` to the page URL (see the "Quick start" section of the top-level `README.md`); without it the page keeps using the deployed `wss://stratum.tensors.vip`.
 
 ## Monero shared-pool mode via P2Pool (optional)
 

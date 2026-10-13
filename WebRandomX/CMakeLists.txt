@@ -1,6 +1,6 @@
 # Builds randomx.wasm: the RandomX interpreter (no JIT - wasm cannot map
 # executable pages) plus src/randomx_bridge.cpp, which exposes the rx_* C ABI
-# crypto-frontend/randomx.js calls. Configure it with emcmake; see build.sh
+# web/randomx.js calls. Configure it with emcmake; see build.sh
 # (POSIX) / build.ps1 (Windows) and README.md in this directory.
 #
 # The RandomX sources are compiled straight from a checkout instead of through

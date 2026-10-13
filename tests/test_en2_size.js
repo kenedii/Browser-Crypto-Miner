@@ -11,7 +11,7 @@
  * This test (a) exercises the REAL randHex implementation pulled from the
  * sources and (b) fails if the doubled expression is ever reintroduced.
  *
- * Run: node test_en2_size.js
+ * Run: node tests/test_en2_size.js
  */
 const fs = require('fs');
 const path = require('path');
@@ -20,7 +20,7 @@ let failures = 0;
 const ok = (m) => console.log('PASS:', m);
 const fail = (m) => { failures++; console.log('FAIL:', m); };
 
-const read = (f) => fs.readFileSync(path.join(__dirname, f), 'utf8');
+const read = (f) => fs.readFileSync(path.join(__dirname, '..', 'web', f), 'utf8');
 
 // Pull a simple top-level function straight out of a source file and compile it,
 // so we assert on the code that actually ships (not a hand-copied clone).

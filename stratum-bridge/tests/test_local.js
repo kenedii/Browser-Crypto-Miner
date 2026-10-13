@@ -4,7 +4,7 @@ const net = require('net');
 const WebSocket = require('ws');
 const { spawn } = require('child_process');
 
-const BRIDGE_DIR = __dirname;
+const BRIDGE_DIR = require('path').join(__dirname, '..');
 const BRIDGE_PORT = 8090;
 const FAKE_POOL_PORT = parseInt(process.env.FAKE_POOL_PORT || '3333', 10);
 

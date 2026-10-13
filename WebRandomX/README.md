@@ -1,14 +1,14 @@
 # WebRandomX - RandomX for the browser miner
 
 Builds `randomx.wasm`, the Monero (`rx/0`) proof-of-work VM that
-`crypto-frontend/xmr-worker.js` hashes with. Nothing here runs at page load:
+`web/xmr-worker.js` hashes with. Nothing here runs at page load:
 the worker fetches `randomx.wasm` only when a user picks Monero and starts
 mining, and every other coin works without it.
 
 ```
 WebRandomX/
   CMakeLists.txt          the build: RandomX's portable sources + src/randomx_bridge.cpp
-  src/randomx_bridge.cpp  the rx_* C ABI that crypto-frontend/randomx.js calls
+  src/randomx_bridge.cpp  the rx_* C ABI that web/randomx.js calls
   build.sh / build.ps1    clone RandomX, run emcmake/cmake, verify the result
   verify_wasm.js          post-build check: instantiate the .wasm exactly like the worker does
   randomx/                the RandomX checkout build.sh clones here (gitignored)
@@ -24,13 +24,13 @@ the verification step.
 
 ```bash
 # Linux / macOS / Git Bash (after `source ./emsdk/emsdk_env.sh`)
-cd crypto-frontend/WebRandomX
+cd WebRandomX
 ./build.sh                      # light mode: 256 MiB cache, ~300 MiB per tab
 ```
 
 ```powershell
 # Windows (after `.\emsdk\emsdk_env.ps1`)
-cd crypto-frontend\WebRandomX
+cd WebRandomX
 .\build.ps1                     # -FullMem, -Ref v1.2.3, -SkipVerify also work
 ```
 
@@ -38,7 +38,7 @@ What the scripts do: shallow-clone RandomX `v1.2.1` into `./randomx` (delete the
 directory to switch refs), apply `patches/randomx-wasm-soft-rounding.patch` (see
 "Floating point rounding" below - without it the module cannot hash correctly),
 configure with `emcmake`, build, then run `node verify_wasm.js` against the result
-and copy `randomx.wasm` to `crypto-frontend/randomx.wasm` for local development.
+and copy `randomx.wasm` to `web/randomx.wasm` for local development.
 Both copies are gitignored: a missing VM is not a broken deploy, it is a Monero
 feature that reports itself as unavailable.
 
@@ -52,7 +52,7 @@ feature that reports itself as unavailable.
 
 Light mode is the default because a browser tab that wants 2.3 GiB is a tab the
 OS kills. Monero's difficulty is high enough that neither mode earns anything
-reliably in a browser; see the honest note in `crypto-frontend/README.md`.
+reliably in a browser; see the honest note in the top-level `README.md`.
 
 ## Status in this checkout
 
@@ -205,7 +205,7 @@ that does not match the reference.
   256 MiB allocation returns NULL (`-sABORTING_MALLOC=0`) and comes back as rc 3
   instead of aborting the instance.
 - **Serving.** `randomx.wasm` must be served as `application/wasm`
-  (`crypto-frontend/nginx.conf` does this, with `no-cache`) from the same origin
+  (`nginx.conf` does this, with `no-cache`) from the same origin
   as the page, or with CORS. It is single-threaded, so no COOP/COEP headers are
   needed, and it is ~1 MB, so it is fetched only when the user picks Monero.
 - **Epochs.** Monero re-keys RandomX roughly every 2048 blocks (~2.8 days). Pools

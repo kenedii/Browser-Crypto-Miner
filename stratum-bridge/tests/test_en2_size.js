@@ -13,13 +13,13 @@
  *   - FIXED client: en2 = randHex(4)  ->  8 hex chars  ->  pool ACCEPTS.
  *   - BUGGY client: en2 = randHex(8)  -> 16 hex chars  ->  pool REJECTS by size.
  *
- * Run: node test_en2_size.js
+ * Run: node tests/test_en2_size.js
  */
 const net = require('net');
 const crypto = require('crypto');
 const WebSocket = require('ws');
 const { spawn } = require('child_process');
-const SC = require('../sha256.js');
+const SC = require('../../web/sha256.js');
 
 const BRIDGE_PORT = 8094;
 const MOCK_PORT = 3400;
@@ -173,7 +173,7 @@ function runClient(buggy) {
 
 mock.listen(MOCK_PORT, '127.0.0.1', () => {
     const bridge = spawn(process.execPath, ['bridge.js'], {
-        cwd: __dirname,
+        cwd: require('path').join(__dirname, '..'),
         env: Object.assign({}, process.env, {
             PORT: String(BRIDGE_PORT),
             BTC_POOL_HOST: '127.0.0.1', BTC_POOL_PORT: String(MOCK_PORT)

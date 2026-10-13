@@ -20,10 +20,10 @@
  *     imports a standalone module declares (the page supplies stubs for those,
  *     and anything it cannot supply is named in the error).
  *
- * Run: node test_xmr_protocol.js
+ * Run: node tests/test_xmr_protocol.js
  */
 const crypto = require('crypto');
-const X = require('./randomx.js');
+const X = require('../web/randomx.js');
 
 let failures = 0;
 const ok = (m) => console.log('PASS:', m);
@@ -251,7 +251,7 @@ function makeStubEngine() {
 // xmr-worker.js is loaded for real (twice, with a fresh module cache) behind a
 // `self` shim, so what is exercised is the actual message protocol the page
 // speaks: start/stop/job in, { vm }, { hashes }, { best }, { share } out.
-const WORKER_PATH = require.resolve('./xmr-worker.js');
+const WORKER_PATH = require.resolve('../web/xmr-worker.js');
 const REAL_LOAD_RANDOMX = X.loadRandomX;
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 

@@ -108,8 +108,8 @@ cd Browser-Crypto-Miner
 # Terminal 1: the WebSocket → Stratum bridge (listens on :8080)
 cd stratum-bridge && npm install && node bridge.js
 
-# Terminal 2: serve the frontend from the repository root
-python3 -m http.server 8000
+# Terminal 2: serve the frontend (the static site lives in web/)
+python3 -m http.server 8000 --directory web
 
 # Open the page pointed at your local bridge
 # http://localhost:8000/mine-crypto.html?bridge=ws://localhost:8080
@@ -119,17 +119,17 @@ python3 -m http.server 8000
 
 ### 2. Enable Monero (build the RandomX VM once)
 
-`randomx.wasm` is a build artefact and is not committed. Build it once by following [`WebRandomX/README.md`](WebRandomX/README.md) (an Emscripten toolchain), then copy the result next to `mine-crypto.html`. Without it Bitcoin, Litecoin and Dogecoin work immediately, and the Monero engine reports exactly what is missing and submits nothing.
+`randomx.wasm` is a build artefact and is not committed. Build it once by following [`WebRandomX/README.md`](WebRandomX/README.md) (an Emscripten toolchain), and the build script copies the result to `web/randomx.wasm` for you. Without it Bitcoin, Litecoin and Dogecoin work immediately, and the Monero engine reports exactly what is missing and submits nothing.
 
 ### 3. Run the tests
 
 ```bash
-node test_sha256.js             # SHA-256, header and merkle maths vs Node crypto
-node test_scrypt.js             # Scrypt vs crypto.scrypt, plus the share-target scale
-node test_en2_size.js           # extranonce2 length always matches what the pool advertised
-node test_xmr_protocol.js       # Monero seam, ABI checks, the "no fake VM" guarantee
-node test_xmr_job_roundtrip.js  # RandomX job normalization survives postMessage
-cd stratum-bridge && node test_modes.js
+npm test                                   # all frontend tests (SHA-256, Scrypt, extranonce2, RandomX seam)
+
+cd stratum-bridge && npm install
+node tests/test_modes.js                   # coin and mode routing, safety checks
+node tests/test_share_e2e.js               # a real captured Bitcoin share verified end to end
+node tests/test_en2_size.js                # strict-pool extranonce2 regression
 ```
 
 ## Deploying
@@ -172,23 +172,33 @@ docker build -t browser-crypto-miner .
 docker run --rm -p 8080:80 browser-crypto-miner   # http://localhost:8080
 ```
 
-`deploy-all.ps1` chains the git push, the Cloud Run deploy and the VPS update into one PowerShell command.
+`scripts/deploy-all.ps1` chains the git push, the Cloud Run deploy and the VPS update into one PowerShell command.
 
 ## How the code is organized
 
-| Path | Role |
-| --- | --- |
-| `mine-crypto.html` | The page shell: styling, background layers and script loading |
-| `miner.js` | The whole UI and the Stratum-over-WebSocket client, plus the WebGPU WGSL SHA-256d kernel |
-| `lattice.js` | The decorative cube-lattice and binary-rain background (optional, the miner never depends on it) |
-| `sha256.js` | Shared Bitcoin maths: midstate, merkle root, header assembly, target checks. Also loaded by the workers and the tests |
-| `miner-worker.js` | CPU worker for SHA-256d, one per thread |
-| `scrypt.js` · `scrypt-worker.js` | Scrypt for Litecoin and Dogecoin, with the pool difficulty scaling |
-| `randomx.js` · `xmr-worker.js` | RandomX loader and ABI check, and the worker that hashes Monero jobs with the WASM VM |
-| `WebRandomX/` | C++ wrapper and build scripts that compile RandomX to WebAssembly, plus a known-answer verifier |
-| `stratum-bridge/` | The Node.js WebSocket ⇄ Stratum bridge, its Docker and Caddy config, and the optional P2Pool service |
-| `Dockerfile` · `nginx.conf` | Minify-and-serve image for Cloud Run |
-| `test_*.js` | Offline tests for the maths and the protocol layers |
+```
+.
+├── web/                  the static site (this is what gets deployed)
+│   ├── mine-crypto.html  page shell: styling, background layers, script loading
+│   ├── miner.js          UI + Stratum-over-WebSocket client + WebGPU SHA-256d kernel
+│   ├── lattice.js        decorative cube-lattice / binary-rain background (optional)
+│   ├── sha256.js         shared Bitcoin maths: midstate, merkle root, header, target checks
+│   ├── miner-worker.js   CPU worker for SHA-256d, one per thread
+│   ├── scrypt.js         Scrypt for LTC / DOGE, incl. the pool difficulty scale
+│   ├── scrypt-worker.js  CPU worker for Scrypt
+│   ├── randomx.js        RandomX loader + ABI check
+│   └── xmr-worker.js     worker that hashes Monero jobs with the WASM VM
+├── stratum-bridge/       Node.js WebSocket ⇄ Stratum bridge
+│   ├── bridge.js         the relay and per-coin routing
+│   ├── docker-compose.yml, Caddyfile   bridge + TLS proxy (+ optional P2Pool)
+│   ├── p2pool/           optional P2Pool container for Monero
+│   └── tests/            bridge integration tests (mock pools, no real mining)
+├── WebRandomX/           C++ wrapper and build scripts that compile RandomX to WebAssembly
+├── tests/                offline tests for the frontend maths and protocol layers
+├── scripts/              deploy-all.ps1: push, Cloud Run deploy and VPS update in one go
+├── Dockerfile            minify-and-serve image for Cloud Run
+└── nginx.conf            static-file server config used by that image
+```
 
 ### Engineering notes
 

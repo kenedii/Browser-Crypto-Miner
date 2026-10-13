@@ -5,10 +5,10 @@
  *   - The stratum prevhash transform against a real captured pool job
  *     (bswap-per-word(prevhash) must equal the internal byte order of the tip).
  *   - The optimized midstate hashing path against the obvious doubleSha256 path.
- * Run: node test_sha256.js
+ * Run: node tests/test_sha256.js
  */
 const crypto = require('crypto');
-const SC = require('./sha256.js');
+const SC = require('../web/sha256.js');
 
 let failures = 0;
 const ok = (m) => console.log('PASS:', m);

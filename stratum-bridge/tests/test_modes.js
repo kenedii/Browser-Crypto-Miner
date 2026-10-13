@@ -129,7 +129,7 @@ setTimeout(() => {
     env.MERGED_POOL_PORT = String(MERGED_PORT);
 
     const bridge = spawn(process.execPath, ['bridge.js'], {
-        cwd: __dirname,
+        cwd: require('path').join(__dirname, '..'),
         env,
         stdio: ['ignore', 'pipe', 'pipe']
     });
@@ -218,7 +218,7 @@ setTimeout(() => {
 
         // The shipped defaults (used when no env override is set) must stay real
         // pools, per coin: a typo here would only show up in production.
-        const src = fs.readFileSync(path.join(__dirname, 'bridge.js'), 'utf8');
+        const src = fs.readFileSync(path.join(__dirname, '..', 'bridge.js'), 'utf8');
         const defaults = ['stratum.btcpowlab-pool.com', 'ltc.viabtc.io', 'doge.mine.zpool.ca', 'pool.supportxmr.com', 'ltc.f2pool.com'];
         const missing = defaults.filter((h) => !src.includes(`'${h}'`) && !src.includes(`"${h}"`));
         missing.length === 0

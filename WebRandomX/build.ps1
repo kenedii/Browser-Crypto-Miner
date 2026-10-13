@@ -94,10 +94,10 @@ if (-not (Test-Path 'randomx.wasm')) { Die 'the build finished but randomx.wasm 
 Say ("Built {0:N0} bytes -> WebRandomX\randomx.wasm" -f (Get-Item 'randomx.wasm').Length)
 
 # The page fetches randomx.wasm next to its own URL, so keep a dev copy beside
-# the served files. The Dockerfile packages WebRandomX\randomx.wasm itself, so
+# the served files. The Dockerfile packages web\randomx.wasm, so
 # this copy only matters for a local static server.
-Copy-Item 'randomx.wasm' '..\randomx.wasm' -Force
-Say 'Copied to crypto-frontend\randomx.wasm (local dev; both are gitignored)'
+Copy-Item 'randomx.wasm' '..\web\randomx.wasm' -Force
+Say 'Copied to web\randomx.wasm (local dev; both are gitignored)'
 
 if (-not $SkipVerify) {
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) { Die 'node is required for verify_wasm.js (or pass -SkipVerify)' }
@@ -106,4 +106,4 @@ if (-not $SkipVerify) {
     if ($LASTEXITCODE -ne 0) { Die 'verify_wasm.js reported problems with the build' }
 }
 
-Say 'Done. Serve crypto-frontend\ and pick Monero (XMR) in the miner.'
+Say 'Done. Serve web\ and pick Monero (XMR) in the miner.'

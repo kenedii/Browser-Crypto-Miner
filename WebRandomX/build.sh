@@ -91,10 +91,10 @@ fi
 say "Built $(ls -l randomx.wasm | awk '{print $5}') bytes -> WebRandomX/randomx.wasm"
 
 # The page fetches randomx.wasm next to its own URL, so keep a dev copy beside
-# the served files. The Dockerfile packages WebRandomX/randomx.wasm itself, so
+# the served files. The Dockerfile packages web/randomx.wasm, so
 # this copy only matters for `python -m http.server`-style local runs.
-cp -f randomx.wasm ../randomx.wasm
-say "Copied to crypto-frontend/randomx.wasm (local dev; both are gitignored)"
+cp -f randomx.wasm ../web/randomx.wasm
+say "Copied to web/randomx.wasm (local dev; both are gitignored)"
 
 if [ "$SKIP_VERIFY" = "0" ]; then
     command -v node >/dev/null || die "node is required for verify_wasm.js (or pass --skip-verify)"
@@ -102,4 +102,4 @@ if [ "$SKIP_VERIFY" = "0" ]; then
     node verify_wasm.js
 fi
 
-say "Done. Serve crypto-frontend/ and pick Monero (XMR) in the miner."
+say "Done. Serve web/ and pick Monero (XMR) in the miner."

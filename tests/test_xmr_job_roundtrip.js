@@ -3,9 +3,9 @@
  * to the worker, which normalizes it again. normalizeJob must be idempotent - it
  * used to re-parse the BigInt target as a string, returned null for real pool
  * targets and the worker logged "the pool job has no usable blob/target", so XMR
- * showed 0 H/s on the live site. Run: node test_xmr_job_roundtrip.js
+ * showed 0 H/s on the live site. Run: node tests/test_xmr_job_roundtrip.js
  */
-const X = require('./randomx.js');
+const X = require('../web/randomx.js');
 let failed = 0;
 const ok = (m) => console.log('PASS:', m);
 const fail = (m) => { console.log('FAIL:', m); failed++; };

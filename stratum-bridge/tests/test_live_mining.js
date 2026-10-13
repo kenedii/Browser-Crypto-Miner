@@ -5,7 +5,7 @@
  * Run: node _live_mine.js
  */
 const WebSocket = require('ws');
-const SC = require('../sha256.js');
+const SC = require('../../web/sha256.js');
 
 const ADDR = '1Datura3728Ch3cGDiSouKcDB7Cxf9vvb6';
 

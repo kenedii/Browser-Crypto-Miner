@@ -1,8 +1,8 @@
 # One-shot deploy: push to GitHub -> Cloud Run frontend -> VPS bridge.
-# Run from this folder in PowerShell:  .\deploy-all.ps1
+# Run in PowerShell from anywhere:  .\scripts\deploy-all.ps1  (or the full path)
 # You only type the VPS password once, when ssh asks for it.
 $ErrorActionPreference = 'Stop'
-Set-Location $PSScriptRoot
+Set-Location (Split-Path $PSScriptRoot -Parent)   # repo root: Dockerfile lives there
 
 Write-Host "`n[1/3] Pushing to GitHub..." -ForegroundColor Cyan
 git push origin main

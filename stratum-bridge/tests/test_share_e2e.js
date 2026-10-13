@@ -8,13 +8,13 @@
  * crypto and the real block-header convention (header prevhash = reversed tip
  * hash), so a wrong stratum prevhash transform cannot pass.
  *
- * Run: node test_share_e2e.js
+ * Run: node tests/test_share_e2e.js
  */
 const net = require('net');
 const crypto = require('crypto');
 const WebSocket = require('ws');
 const { spawn } = require('child_process');
-const SC = require('../sha256.js');
+const SC = require('../../web/sha256.js');
 
 const BRIDGE_PORT = 8093;
 const MOCK_PORT = 3399;
@@ -156,7 +156,7 @@ function runClient() {
 
 mock.listen(MOCK_PORT, '127.0.0.1', () => {
     const bridge = spawn(process.execPath, ['bridge.js'], {
-        cwd: __dirname,
+        cwd: require('path').join(__dirname, '..'),
         env: Object.assign({}, process.env, {
             PORT: String(BRIDGE_PORT),
             BTC_POOL_HOST: '127.0.0.1', BTC_POOL_PORT: String(MOCK_PORT)

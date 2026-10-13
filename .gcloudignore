@@ -3,5 +3,5 @@
 node_modules/
 stratum-bridge/
 WebRandomX/
-test_*.js
+tests/
 *.md

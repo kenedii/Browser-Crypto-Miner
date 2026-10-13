@@ -1,9 +1,9 @@
 # Stage 1: build the frontend assets (de-comment / minify, no obfuscation)
 FROM node:20-alpine AS build
 WORKDIR /build
-# randomx.wasm* is optional (gitignored build artefact of WebRandomX/): the glob
+# web/randomx.wasm* is optional (gitignored build artefact of WebRandomX/): the glob
 # lets the image build without it, in which case Monero reports the VM as missing.
-COPY mine-crypto.html miner.js lattice.js sha256.js scrypt.js randomx.js miner-worker.js scrypt-worker.js xmr-worker.js randomx.wasm* ./
+COPY web/mine-crypto.html web/miner.js web/lattice.js web/sha256.js web/scrypt.js web/randomx.js web/miner-worker.js web/scrypt-worker.js web/xmr-worker.js web/randomx.wasm* ./
 # Strip comments and collapse whitespace with terser; no identifier mangling.
 RUN for f in miner lattice sha256 scrypt randomx miner-worker scrypt-worker xmr-worker; do \
       npx --yes terser@5 $f.js -c -o $f.min.js && mv $f.min.js $f.js; \

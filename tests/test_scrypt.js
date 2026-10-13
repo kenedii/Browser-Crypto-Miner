@@ -15,11 +15,11 @@
  *     bytes and the digest-word layout, so the LTC/DOGE worker cannot drift from
  *     the (already anchored) Bitcoin job handling.
  *
- * Run: node test_scrypt.js
+ * Run: node tests/test_scrypt.js
  */
 const crypto = require('crypto');
-const SC = require('./sha256.js');
-const SCRYPT = require('./scrypt.js');
+const SC = require('../web/sha256.js');
+const SCRYPT = require('../web/scrypt.js');
 
 let failures = 0;
 const ok = (m) => console.log('PASS:', m);
