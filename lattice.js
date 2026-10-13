@@ -2,11 +2,20 @@
    an infinite wireframe-cube lattice (three.js), faint binary rain, and a
    scrolling hex ticker. Purely decorative - the miner never depends on it. */
 
+/* Ambient controller. miner.js calls window.__ambient.pause() when mining starts
+   and resume() when it stops, so while a miner runs the whole page is static and
+   every cycle goes to hashing. Each effect below registers its own pause/resume. */
+var __ambient = window.__ambient = {
+  subs: [],
+  paused: !!(document.body && document.body.classList.contains('mining')),
+  pause: function () { this.paused = true; this.subs.forEach(function (s) { s.pause(); }); },
+  resume: function () { this.paused = false; this.subs.forEach(function (s) { s.resume(); }); }
+};
+
 /* ---------- binary rain ---------- */
 (function () {
   var canvas = document.getElementById('rain');
   if (!canvas) return;
-  var reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   var ctx = canvas.getContext('2d');
   var COLORS = ['#00ff66', '#19a7ff', '#ff2a4d'];
   var HEX = '0123456789ABCDEF';
@@ -30,7 +39,6 @@
   }
   var last = 0;
   function frame(t) {
-    if (!reduce) requestAnimationFrame(frame);
     if (t - last < 33) return; last = t;
     ctx.clearRect(0, 0, w, h);
     ctx.font = o.size + 'px "Share Tech Mono", monospace';
@@ -56,21 +64,49 @@
     }
     ctx.globalAlpha = 1;
   }
+  var raf = 0;
+  function loop(t) { raf = requestAnimationFrame(loop); frame(t); }
+  function start() { if (!raf) raf = requestAnimationFrame(loop); }
+  function stop() { if (raf) { cancelAnimationFrame(raf); raf = 0; } }
   if (window.ResizeObserver) new ResizeObserver(resize).observe(canvas); else addEventListener('resize', resize);
-  resize(); requestAnimationFrame(frame);
+  resize();
+  if (__ambient.paused) frame(performance.now() + 100); else start();   // paused: one still frame
+  __ambient.subs.push({ pause: stop, resume: start });
 })();
 
 /* ---------- hex ticker in the top strip ---------- */
+/* The values keep changing: a few cells re-roll every 350 ms, on top of the slow
+   scroll. Both stop while a miner is running. */
 (function () {
   var b = document.getElementById('tick1');
   if (!b) return;
-  var cls = ['g', 'bl', 'r'], html = '';
-  for (var i = 0; i < 40; i++) {
-    var bits = ''; for (var k = 0; k < 8; k++) bits += Math.random() < .5 ? '0' : '1';
-    var hex = '0x' + ('00000000' + ((Math.random() * 4294967296) >>> 0).toString(16)).slice(-8);
-    html += '<span>' + bits + '</span> <span class="' + cls[i % 3] + '">' + hex + '</span>&nbsp;·&nbsp; ';
+  var N = 40, cls = ['g', 'bl', 'r'];
+  function rbits() { var t = ''; for (var k = 0; k < 8; k++) t += Math.random() < .5 ? '0' : '1'; return t; }
+  function rhex() { return '0x' + ('00000000' + ((Math.random() * 4294967296) >>> 0).toString(16)).slice(-8); }
+  var cells = [], frag = document.createDocumentFragment();
+  // the list is written twice so the CSS scroll (translateX -50%) loops seamlessly
+  for (var copy = 0; copy < 2; copy++) {
+    for (var i = 0; i < N; i++) {
+      var bits = document.createElement('span'), hex = document.createElement('span');
+      hex.className = cls[i % 3];
+      if (copy === 0) { bits.textContent = rbits(); hex.textContent = rhex(); cells[i] = {bits: [bits], hex: [hex]}; }
+      else { bits.textContent = cells[i].bits[0].textContent; hex.textContent = cells[i].hex[0].textContent; cells[i].bits.push(bits); cells[i].hex.push(hex); }
+      frag.appendChild(bits); frag.appendChild(document.createTextNode(' '));
+      frag.appendChild(hex); frag.appendChild(document.createTextNode('\u00a0·\u00a0 '));
+    }
   }
-  b.innerHTML = html + html;
+  b.appendChild(frag);
+  function churn() {
+    for (var n = 0; n < 7; n++) {
+      var c = cells[Math.random() * N | 0], nb = rbits(), nh = rhex();
+      for (var j = 0; j < 2; j++) { c.bits[j].textContent = nb; c.hex[j].textContent = nh; }
+    }
+  }
+  var timer = 0;
+  function start() { if (!timer) timer = setInterval(churn, 350); }
+  function stop() { if (timer) { clearInterval(timer); timer = 0; } }
+  if (!__ambient.paused) start();
+  __ambient.subs.push({ pause: stop, resume: start });
 })();
 
 /* ---------- infinite wireframe-cube lattice (drag to look, click to pulse) ---------- */
@@ -225,6 +261,7 @@
 
   const ray = new THREE.Raycaster(), v2 = new THREE.Vector2();
   function pulseAt(x, y) {
+    if (__ambient.paused) return;
     v2.set(x / innerWidth * 2 - 1, -(y / innerHeight * 2 - 1));
     ray.setFromCamera(v2, camera);
     uniforms.uPulseO.value.copy(ray.ray.origin).addScaledVector(ray.ray.direction, 18);
@@ -244,11 +281,9 @@
   camera.position.set(S * .5, S * .5, S * .5);
   const fwd = new THREE.Vector3();
   let last = performance.now();
-  const reduce = matchMedia('(prefers-reduced-motion: reduce)').matches;
   function frame(now) {
-    requestAnimationFrame(frame);
     const dt = Math.min(.05, (now - last) / 1000); last = now;
-    uniforms.uTime.value += reduce ? 0 : dt;
+    uniforms.uTime.value += dt;
 
     yaw += (tYaw - mx * .35 - yaw) * Math.min(1, dt * 4);
     pitch += (tPitch - my * .22 - pitch) * Math.min(1, dt * 4);
@@ -256,7 +291,7 @@
     camera.rotation.z = Math.sin(uniforms.uTime.value * .2) * .04;
 
     camera.getWorldDirection(fwd);
-    camera.position.addScaledVector(fwd, (reduce ? 0 : DRIFT) * dt);
+    camera.position.addScaledVector(fwd, DRIFT * dt);
 
     // infinite: snap the lattice block to the cell the camera is in
     lattice.position.set(Math.round(camera.position.x / S) * S, Math.round(camera.position.y / S) * S, Math.round(camera.position.z / S) * S);
@@ -277,5 +312,12 @@
 
     renderer.render(scene, camera);
   }
-  requestAnimationFrame(frame);
+  let raf = 0;
+  function loop(now) { raf = requestAnimationFrame(loop); frame(now); }
+  function start() { if (!raf) { last = performance.now(); raf = requestAnimationFrame(loop); } }
+  function stop() { if (raf) { cancelAnimationFrame(raf); raf = 0; } }
+  // while paused the canvas keeps its last frame; a resize clears it, so redraw once
+  addEventListener('resize', () => { if (!raf) renderer.render(scene, camera); });
+  __ambient.subs.push({ pause: stop, resume: start });
+  if (__ambient.paused) { frame(performance.now()); } else start();
 })();

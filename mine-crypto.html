@@ -167,7 +167,9 @@
             .banner .sub { letter-spacing: .25em; }
             .hint { display: none; }
         }
-        @media (prefers-reduced-motion: reduce) { .tick b, .tab::before { animation: none; } }
+        /* While a miner runs the page is static, so every cycle goes to hashing. */
+        body.mining .tick b, body.mining .tab::before { animation-play-state: paused; }
+        body.mining * { transition-duration: 0s !important; }
     </style>
 </head>
 <body>
@@ -183,8 +185,6 @@
                 <span class="chev" aria-hidden="true">&gt;&gt;</span>
                 <a class="tab" href="https://tensors.vip/">TENSORS.VIP <span class="arrow">&#8599;</span></a>
                 <div class="tick" aria-hidden="true"><b id="tick1"></b></div>
-                <span class="stat">ALGOS <em>4</em></span>
-                <span class="stat">BRIDGE <em>WSS</em></span>
             </nav>
 
             <div class="window">

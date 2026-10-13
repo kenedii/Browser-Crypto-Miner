@@ -16,6 +16,15 @@ function runMinerApp() {
 
     // Stratum session / reconnect state (see scheduleReconnect below).
     let wantMining = false;        // user intent: keep the pool session alive
+
+    // While a miner runs the whole page goes static (cube lattice, binary rain,
+    // hex ticker and CSS animations) so every cycle goes to hashing. See lattice.js.
+    function setAmbient(on) {
+        try {
+            document.body.classList.toggle('mining', !on);
+            if (window.__ambient) { if (on) window.__ambient.resume(); else window.__ambient.pause(); }
+        } catch (e) {}
+    }
     let stratumConnected = false;  // pool session currently authorized
     let reconnectAttempts = 0;
     let reconnectTimer = null;
@@ -173,7 +182,7 @@ function runMinerApp() {
 
               <h3>Can I really find a block?</h3>
               <p>
-                In theory, yes &mdash; every share is a genuine candidate. In practice, no: a browser finding a Bitcoin block is roughly one chance in hundreds of millions of years of nonstop mining. Treat this as an honest lottery and a technology demo, not a money machine. Shares only count towards a block if a <em>pool</em> sees them and broadcasts the result &mdash; this page never broadcasts anything itself.
+                In theory, yes &mdash; every share is a genuine candidate. In practice, no: a browser finding a Bitcoin block is roughly one chance in hundreds of millions of years of nonstop mining. Treat this as an honest lottery and a technology demo, not a money machine. A share only matters if the <em>pool</em> accepts it. This page just forwards your shares to the pool and never broadcasts anything to the network itself. The pool checks every share against the network target and, only when one also meets that target, builds the full block and submits it to the network through its own node.
               </p>
 
               <h3>Three numbers, not one</h3>
@@ -203,7 +212,13 @@ function runMinerApp() {
 
               <h3>How decentralized is it?</h3>
               <p>
-                The work is real, but it routes through one proxy (the bridge), which limits autonomy compared with running a full node locally. Monero through P2Pool removes the pool operator, but the bridge still sits between your browser and the P2Pool node. This project is about making proof-of-work reachable from any browser, not about replacing dedicated mining hardware.
+                The <strong>pool</strong> is the part that talks to the blockchain. It runs (or is connected to) a full node, asks that node for a block template, and turns it into the jobs your miner receives (<code>mining.notify</code> for Bitcoin-style coins, <code>job</code> for Monero). When a share also meets the network target, the pool assembles the block and broadcasts it through that node to the rest of the network.
+              </p>
+              <p>
+                The <strong>bridge</strong> only exists because a browser cannot open a raw TCP socket and pools speak Stratum over TCP. Your tab opens a WebSocket (<code>wss://</code>) to the bridge, and the bridge opens one TCP connection to the chosen pool and relays the newline-delimited JSON-RPC messages in both directions, unchanged. It runs no node, holds no chain state and never sees or builds a block. It sees your public receiving address and connection metadata such as your IP, and a bridge operator could in principle delay or drop messages, so you can host your own bridge and point the page at it with <code>?bridge=ws://your-host:8080</code>.
+              </p>
+              <p>
+                For Monero the shared pool is <strong>P2Pool</strong>, which has no operator at all. Its container connects to a Monero node over RPC and ZMQ to get block templates and to submit blocks, and to other P2Pool peers over the P2P network to share the sidechain. Payouts are written into the block's coinbase transaction, so a block pays you directly with no pool wallet in between. The remaining central piece is the bridge between your browser and that P2Pool node. This project is about making proof-of-work reachable from any browser, not about replacing dedicated mining hardware.
               </p>
 
               <h3>Is it safe?</h3>
@@ -1755,6 +1770,7 @@ function runMinerApp() {
         reconnectAttempts = 0;
         if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
         isMining = true;
+        setAmbient(false);
         startTime = Date.now();
         totalHashes = 0;
         sharesFound = 0;
@@ -1781,6 +1797,7 @@ function runMinerApp() {
         elements.status.textContent = "Mining failed: " + e.message;
         logLine('Mining failed: ' + e.message, 'error');
         isMining = false;
+        setAmbient(true);
         cancelAnimationFrame(animationFrameId);
         workers.forEach(w => w.terminate());
         workers = [];
@@ -1791,6 +1808,7 @@ function runMinerApp() {
 
     elements.stopBtn.addEventListener("click", () => {
       isMining = false;
+      setAmbient(true);
       wantMining = false;
       stratumConnected = false;
       if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
