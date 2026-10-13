@@ -3,9 +3,9 @@ FROM node:20-alpine AS build
 WORKDIR /build
 # randomx.wasm* is optional (gitignored build artefact of WebRandomX/): the glob
 # lets the image build without it, in which case Monero reports the VM as missing.
-COPY mine-crypto.html miner.js sha256.js scrypt.js randomx.js miner-worker.js scrypt-worker.js xmr-worker.js randomx.wasm* ./
+COPY mine-crypto.html miner.js lattice.js sha256.js scrypt.js randomx.js miner-worker.js scrypt-worker.js xmr-worker.js randomx.wasm* ./
 # Strip comments and collapse whitespace with terser; no identifier mangling.
-RUN for f in miner sha256 scrypt randomx miner-worker scrypt-worker xmr-worker; do \
+RUN for f in miner lattice sha256 scrypt randomx miner-worker scrypt-worker xmr-worker; do \
       npx --yes terser@5 $f.js -c -o $f.min.js && mv $f.min.js $f.js; \
     done
 # Collect exactly the files the site serves (plus randomx.wasm when it exists).

@@ -72,143 +72,148 @@ function runMinerApp() {
     // Clear loading message and inject UI
     container.innerHTML = '';
     container.innerHTML = `
-      <div class="miner-container" style="background: rgba(42, 15, 69, 0.4); border: 1px solid rgba(255, 255, 255, 0.12); backdrop-filter: blur(4px); border-radius: 20px; padding: 32px; width: 100%; max-width: 500px; box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); margin: 0 auto;">
-        <h2 style="margin-top: 0; margin-bottom: 24px; font-weight: 600; text-transform: uppercase; letter-spacing: 2px; text-align: center;">Web Mining Panel</h2>
-
-        <div class="form-group" style="margin-bottom: 20px;">
-          <label for="coin" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Crypto / Pool</label>
-          <select id="coin" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-            <option value="BTC" selected>Bitcoin (BTC) - SHA-256d</option>
-            <option value="LTC">Litecoin (LTC) - Scrypt</option>
-            <option value="DOGE">Dogecoin (DOGE) - Scrypt</option>
-            <option value="XMR">Monero (XMR) - RandomX</option>
-          </select>
+      <div class="miner-panel">
+        <div class="row2">
+          <div class="field">
+            <label for="coin">Crypto / Pool</label>
+            <select id="coin">
+              <option value="BTC" selected>Bitcoin (BTC) - SHA-256d</option>
+              <option value="LTC">Litecoin (LTC) - Scrypt</option>
+              <option value="DOGE">Dogecoin (DOGE) - Scrypt</option>
+              <option value="XMR">Monero (XMR) - RandomX</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="mode">Mining Mode</label>
+            <select id="mode">
+              <option value="solo" selected>Solo - mine and keep the full block reward (default)</option>
+              <option value="pplns">Shared Pool (btcpowlab) - PPLNS / hybrid, no account needed</option>
+              <option value="merged" id="mode-merged">Merged (LTC + DOGE) - one scrypt session, both chains</option>
+              <option value="custom">Custom Pool - mine for your own pool</option>
+            </select>
+          </div>
         </div>
 
-        <div class="form-group" style="margin-bottom: 20px;">
-          <label for="mode" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Mining Mode</label>
-          <select id="mode" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-            <option value="solo" selected>Solo - mine and keep the full block reward (default)</option>
-            <option value="pplns">Shared Pool (btcpowlab) - PPLNS / hybrid, no account needed</option>
-            <option value="merged" id="mode-merged">Merged (LTC + DOGE) - one scrypt session, both chains</option>
-            <option value="custom">Custom Pool - mine for your own pool</option>
-          </select>
-        </div>
-
-        <div class="form-group" style="margin-bottom: 20px;">
-          <label for="address" id="address-label" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Wallet Address</label>
-          <input type="text" id="address" placeholder="Enter your BTC address" value="" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-          <div id="address-hint" style="margin-top: 8px; font-size: 12px; line-height: 1.45; opacity: 0.72; display: none;">
+        <div class="field">
+          <label for="address" id="address-label">Wallet Address</label>
+          <input type="text" id="address" placeholder="Enter your BTC address" value="" autocomplete="off" spellcheck="false">
+          <div id="address-hint">
             No account or username is needed for the default pool &mdash; you are logged in automatically as
-            <code style="background: rgba(0,0,0,0.35); padding: 1px 5px; border-radius: 4px;">&lt;your-address&gt;.browser</code>.
+            <code>&lt;your-address&gt;.browser</code>.
           </div>
-          <div id="pool-dashboard" style="margin-top: 10px; display: none;">
-            <a href="https://btcpowlab-pool.com/start" target="_blank" rel="noopener" style="color: #b892ff; font-size: 13px; text-decoration: underline;">View the live pool dashboard &nearr;</a>
-          </div>
-        </div>
-
-        <div class="form-group" id="custom-pool-group" style="margin-bottom: 20px; display: none;">
-          <label style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Custom Pool Connection</label>
-          <input type="text" id="pool-host" placeholder="Pool host (e.g. pool.example.com)" style="width: 100%; margin-bottom: 8px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-          <input type="number" id="pool-port" placeholder="Port (e.g. 3333)" style="width: 100%; margin-bottom: 8px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-          <input type="text" id="pool-worker" placeholder="Worker / username" style="width: 100%; margin-bottom: 8px; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-          <input type="password" id="pool-password" placeholder="Password (x if none required)" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-        </div>
-
-        <div class="form-group" style="margin-bottom: 20px;">
-          <label for="device" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">Mining Device</label>
-          <select id="device" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-            <option value="">Detecting devices...</option>
-          </select>
-        </div>
-
-        <div class="form-group" id="cpu-threads-group" style="margin-bottom: 20px;">
-             <label for="threads" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">CPU Threads</label>
-             <input type="number" id="threads" min="1" max="128" value="1" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px; font-family: inherit; font-size: 14px; outline: none;">
-        </div>
-
-        <div class="form-group" id="gpu-intensity-group" style="margin-bottom: 20px; display: none;">
-            <label for="intensity" style="display: block; font-size: 12px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7; margin-bottom: 8px;">GPU Intensity (nonces per batch: <span id="intensity-val">1,048,576</span>)</label>
-            <input type="range" id="intensity" min="64" max="65535" value="16384" step="64" style="width: 100%; background: rgba(0, 0, 0, 0.3); border: 1px solid rgba(255, 255, 255, 0.2); color: #fff; padding: 12px; border-radius: 8px;">
-        </div>
-
-        <div class="stats" style="margin-top: 24px; padding-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.1); display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
-          <div class="stat-item" style="text-align: center;">
-            <div class="stat-value" id="hashrate" style="font-size: 20px; font-weight: 700; margin-bottom: 4px; font-feature-settings: 'tnum';">0.00 MH/s</div>
-            <div class="stat-label" style="font-size: 11px; opacity: 0.6; text-transform: uppercase;">Hashrate</div>
-          </div>
-          <div class="stat-item" style="text-align: center;">
-            <div class="stat-value" id="network-block" style="font-size: 20px; font-weight: 700; margin-bottom: 4px; font-feature-settings: 'tnum';">...</div>
-            <div class="stat-label" style="font-size: 11px; opacity: 0.6; text-transform: uppercase;">Current Block</div>
-          </div>
-          <div class="stat-item" style="text-align: center;">
-            <div class="stat-value" id="runtime" style="font-size: 20px; font-weight: 700; margin-bottom: 4px; font-feature-settings: 'tnum';">00:00:00</div>
-            <div class="stat-label" style="font-size: 11px; opacity: 0.6; text-transform: uppercase;">Time Elapsed</div>
-          </div>
-          <div class="stat-item" style="text-align: center;">
-            <div class="stat-value" id="difficulty" style="font-size: 20px; font-weight: 700; margin-bottom: 4px; font-feature-settings: 'tnum';">...</div>
-            <div class="stat-label" style="font-size: 11px; opacity: 0.6; text-transform: uppercase;">Network Difficulty</div>
-          </div>
-          <div class="stat-item" style="text-align: center;">
-            <div class="stat-value" id="share-difficulty" style="font-size: 20px; font-weight: 700; margin-bottom: 4px; font-feature-settings: 'tnum';">...</div>
-            <div class="stat-label" style="font-size: 11px; opacity: 0.6; text-transform: uppercase;">Share Difficulty</div>
-          </div>
-          <div class="stat-item" style="text-align: center;">
-            <div class="stat-value" id="best-share" style="font-size: 20px; font-weight: 700; margin-bottom: 4px; font-feature-settings: 'tnum';">0</div>
-            <div class="stat-label" style="font-size: 11px; opacity: 0.6; text-transform: uppercase;">Best Share</div>
-          </div>
-          <div class="stat-item" style="text-align: center;">
-             <div class="stat-value" id="total-hashes" style="font-size: 20px; font-weight: 700; margin-bottom: 4px; font-feature-settings: 'tnum';">0</div>
-             <div class="stat-label" style="font-size: 11px; opacity: 0.6; text-transform: uppercase;">Total Hashes</div>
-          </div>
-          <div class="stat-item" style="text-align: center;">
-             <div class="stat-value" id="network-status" style="font-size: 16px; font-weight: 700; margin-bottom: 4px; color: #aaa;">Only Local</div>
-             <div class="stat-label" style="font-size: 11px; opacity: 0.6; text-transform: uppercase;">Network</div>
+          <div id="pool-dashboard">
+            <a href="https://btcpowlab-pool.com/start" target="_blank" rel="noopener">View the live pool dashboard &nearr;</a>
           </div>
         </div>
 
-        <div class="status-log" id="status" style="margin-top: 16px; font-size: 12px; font-family: monospace; color: rgba(255, 255, 255, 0.6); text-align: center; min-height: 1.5em;">Ready to initialize</div>
+        <div class="field" id="custom-pool-group" style="display: none;">
+          <label>Custom Pool Connection</label>
+          <input type="text" id="pool-host" placeholder="Pool host (e.g. pool.example.com)">
+          <input type="number" id="pool-port" placeholder="Port (e.g. 3333)">
+          <input type="text" id="pool-worker" placeholder="Worker / username">
+          <input type="password" id="pool-password" placeholder="Password (x if none required)">
+        </div>
 
-        <div class="miner-console" style="margin-top: 16px; background: rgba(0, 0, 0, 0.45); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 10px; padding: 10px 12px; text-align: left;">
-          <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 6px;">
-            <span style="font-size: 11px; text-transform: uppercase; letter-spacing: 1px; opacity: 0.7;">Console</span>
-            <button id="console-clear" type="button" style="background: transparent; border: 1px solid rgba(255, 255, 255, 0.2); color: rgba(255, 255, 255, 0.7); border-radius: 6px; font-size: 11px; padding: 2px 8px; cursor: pointer;">Clear</button>
+        <div class="row2">
+          <div class="field">
+            <label for="device">Mining Device</label>
+            <select id="device">
+              <option value="">Detecting devices...</option>
+            </select>
           </div>
-          <div id="console-log" aria-live="polite" style="height: 180px; overflow-y: auto; font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 11.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;"></div>
+          <div class="field" id="cpu-threads-group">
+            <label for="threads">CPU Threads</label>
+            <input type="number" id="threads" min="1" max="128" value="1">
+          </div>
         </div>
 
-        <div class="btn-row" style="display: flex; gap: 12px; margin-top: 32px;">
-          <button id="start-btn" style="flex: 1; padding: 14px; border: none; border-radius: 999px; font-weight: 600; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: transform 0.2s, opacity 0.2s; background: #7d3cff; color: white;">Start Mining</button>
-          <button id="stop-btn" style="flex: 1; padding: 14px; border: none; border-radius: 999px; font-weight: 600; cursor: pointer; text-transform: uppercase; letter-spacing: 1px; transition: transform 0.2s, opacity 0.2s; background: rgba(255, 255, 255, 0.1); color: white;" disabled>Stop</button>
+        <div class="field" id="gpu-intensity-group" style="display: none;">
+          <label for="intensity">GPU Intensity (nonces per batch: <span id="intensity-val">1,048,576</span>)</label>
+          <input type="range" id="intensity" min="64" max="65535" value="16384" step="64">
         </div>
 
-        <div class="info-text" style="margin-top: 32px; padding-top: 24px; border-top: 1px solid rgba(255, 255, 255, 0.1); font-size: 13px; line-height: 1.5; opacity: 0.8;">
-          <h3 style="font-size: 14px; text-transform: uppercase; margin-bottom: 8px;">How it works</h3>
-          <p>
-              Every mode submits <strong>real</strong> Bitcoin (SHA-256) work to a real pool through the <strong>Stratum Bridge</strong> at wss://stratum.tensors.vip.
-              <br><br>
-              <strong>Solo &mdash; default:</strong> your wallet address is the payout address &mdash; if a share you submit solves a block, the full block reward is paid to you. Be aware that <strong>solo.ckpool.org enforces a minimum share difficulty of 10,000</strong>: a browser cannot realistically reach that, so this page normally just tracks your best local share and submits nothing. A browser finding a full block is effectively impossible (roughly one chance in hundreds of millions of years of nonstop mining) &mdash; treat this as an honest lottery, not a reliable miner.
-              <br><br>
-              <strong>Three numbers, not one:</strong> the <em>Network Difficulty</em> panel is the real, live Bitcoin difficulty, read straight from each job's header &mdash; a block needs a hash at or below that target, and only the <strong>pool</strong> (ckpool) detects and broadcasts it (this page never broadcasts anything). <em>Share Difficulty</em> shown as &ldquo;&hellip; min&rdquo; is the lowest difficulty the pool will <em>credit</em>; anything easier is rejected as &ldquo;Above target&rdquo;, so the miner simply does not send it. The engines always <em>search</em> at difficulty 1 (the easiest target) instead of the pool's higher starting difficulty, so they never waste time and <em>Best Share</em> keeps moving; any hash the pool accepts is submitted the moment it does. <em>Best Share</em> is the rarest hash you have found so far, even when it is still below the pool's minimum.
-              <br><br>
-              <strong>Shared Pool (btcpowlab):</strong> your work joins the open btcpowlab hybrid pool. No account is required &mdash; your wallet address is credited automatically. Eligible earnings use a hybrid allocation (85% to the block finder, 10% to other recent miners, 5% to operation). btcpowlab starts every miner at a high difficulty (1024) and ignores <code>suggest_difficulty</code>, so it can take a few minutes of vardiff to ramp down to 1 &mdash; until then found hashes show as your <em>Best Share</em> but are not credited.
-              <br><br>
-              <strong>Custom Pool:</strong> enter your own pool's host, port and worker login &mdash; your hashes are credited to that pool/account.
-              <br><br>
-              <strong>Engines:</strong> Bitcoin can use CPU Web Workers (double-SHA-256) or the WebGPU (WGSL) SHA-256d kernel that scans millions of nonces per frame, or both at once. Litecoin, Dogecoin (Scrypt) and Monero (RandomX) are memory-hard by design and run on the CPU only, and they are orders of magnitude slower per hash - expect a few hashes per second, not millions. Browser mining is extremely limited and no block or reward is guaranteed.
-              <br><br>
-              <strong>Coins &amp; algorithms:</strong> the coin selector picks the proof of work the pool speaks. BTC = double-SHA-256d; LTC/DOGE = Scrypt (same Stratum dialect as Bitcoin, only the PoW hash differs); XMR = RandomX over the pool's block hashing blob, using xmrig's <code>login / job / submit</code> wire protocol instead of <code>subscribe / authorize / notify</code>. RandomX needs its WebAssembly module (<code>randomx.wasm</code>, built from <code>WebRandomX/</code>) served next to this page: until it loads the Monero worker reports it and <em>submits nothing</em>, because hashing without the real RandomX VM would only produce garbage. Litecoin also offers <em>Merged (LTC + DOGE)</em>: one scrypt session at an LTC pool that puts a Dogecoin block inside the Litecoin blocks it finds, so the same work is credited on both chains - the pool builds the auxpow, and this page only submits the same shares it always does.
-              <br><br>
-              <strong>Addresses:</strong> each coin validates its own wallet format before connecting - a Bitcoin address can never credit a Litecoin, Dogecoin or Monero share.
-              <br><br>
-              <em>Decentralization Note:</em> While this approach democratizes computation by distributing real network Proof-of-Work (SHA-256 for BTC) across many disparate browser instances, it has a limitation: the underlying submitted work routes through one centralized proxy (the bridge). This limits the "true" autonomy compared to running a full node locally, but successfully expands the overall hash pool to browsers.
-          </p>
+        <div class="stats">
+          <div class="stat-item"><div class="stat-value" id="hashrate">0.00 MH/s</div><div class="stat-label">Hashrate</div></div>
+          <div class="stat-item"><div class="stat-value" id="network-block">...</div><div class="stat-label">Current Block</div></div>
+          <div class="stat-item"><div class="stat-value" id="runtime">00:00:00</div><div class="stat-label">Time Elapsed</div></div>
+          <div class="stat-item"><div class="stat-value" id="difficulty">...</div><div class="stat-label">Network Difficulty</div></div>
+          <div class="stat-item"><div class="stat-value" id="share-difficulty">...</div><div class="stat-label">Share Difficulty</div></div>
+          <div class="stat-item"><div class="stat-value" id="best-share">0</div><div class="stat-label">Best Share</div></div>
+          <div class="stat-item"><div class="stat-value" id="total-hashes">0</div><div class="stat-label">Total Hashes</div></div>
+          <div class="stat-item"><div class="stat-value" id="network-status">Only Local</div><div class="stat-label">Network</div></div>
         </div>
 
-        <div class="miner-footer" style="margin-top: 24px; padding-top: 16px; border-top: 1px solid rgba(255, 255, 255, 0.1); text-align: center; font-size: 12px; opacity: 0.8;">
-          <a href="https://github.com/kenedii/Browser-Crypto-Miner" target="_blank" rel="noopener" style="color: #b892ff; text-decoration: none;">View source on GitHub &#8599;</a>
+        <div id="status">Ready to initialize</div>
+
+        <div class="miner-console">
+          <div class="console-head">
+            <span class="lbl">Console</span>
+            <button id="console-clear" type="button">Clear</button>
+          </div>
+          <div id="console-log" aria-live="polite"></div>
+        </div>
+
+        <div class="btn-row">
+          <button id="start-btn" class="btn" type="button">Start Mining</button>
+          <button id="stop-btn" class="btn" type="button" disabled>Stop</button>
         </div>
       </div>
+
+      <section class="faq">
+        <button id="faq-toggle" class="faq-btn" type="button" aria-expanded="false" aria-controls="faq-body">
+          <span>FAQ</span><span class="arrow" aria-hidden="true">&#9662;</span>
+        </button>
+        <div id="faq-body" class="faq-body" role="region" aria-label="Frequently asked questions">
+          <div class="faq-inner">
+            <div class="faq-content">
+              <h3>What is this?</h3>
+              <p>
+                A browser-based miner for four coins. Your tab does the <strong>real</strong> proof-of-work &mdash; double-SHA-256 for Bitcoin, Scrypt for Litecoin and Dogecoin, RandomX for Monero &mdash; and submits the shares to a real pool. Browsers cannot open raw TCP sockets, so the work travels through a small <strong>Stratum Bridge</strong> at wss://stratum.tensors.vip that translates WebSocket to the pool's Stratum protocol. The bridge only relays: it holds no keys and takes no cut.
+              </p>
+
+              <h3>Can I really find a block?</h3>
+              <p>
+                In theory, yes &mdash; every share is a genuine candidate. In practice, no: a browser finding a Bitcoin block is roughly one chance in hundreds of millions of years of nonstop mining. Treat this as an honest lottery and a technology demo, not a money machine. Shares only count towards a block if a <em>pool</em> sees them and broadcasts the result &mdash; this page never broadcasts anything itself.
+              </p>
+
+              <h3>Three numbers, not one</h3>
+              <ul>
+                <li><strong>Network Difficulty</strong> &mdash; the real, live difficulty read straight from each job. A block needs a hash at or below that target.</li>
+                <li><strong>Share Difficulty</strong> &mdash; the lowest difficulty the pool will credit. Anything easier is rejected as &ldquo;Above target&rdquo;, so the miner never sends it. Values shown as &ldquo;min&rdquo; are that floor.</li>
+                <li><strong>Best Share</strong> &mdash; the rarest hash you have found so far, even if it is below the pool's minimum. The Bitcoin engines search at difficulty 1 so this keeps moving, and any hash the pool accepts is submitted the moment it is found.</li>
+              </ul>
+
+              <h3>Mining modes</h3>
+              <ul>
+                <li><strong>Solo</strong> &mdash; your own address is the payout address; if a share solves a block, the full reward is yours. Note that solo.ckpool.org enforces a minimum share difficulty of 10,000, which a browser cannot realistically reach, so on Bitcoin solo the page mostly tracks your best local share and submits nothing.</li>
+                <li><strong>Shared Pool</strong> &mdash; no account needed; your address is credited automatically. Bitcoin uses the btcpowlab hybrid pool (85% to the block finder, 10% to other recent miners, 5% to operation) and starts every miner at difficulty 1024, so it can take a few minutes of vardiff to ramp down. Litecoin uses ltc.viabtc.io, Dogecoin doge.mine.zpool.ca, and Monero uses <strong>P2Pool</strong> &mdash; a decentralized pool with no operator, paid straight to your address.</li>
+                <li><strong>Merged (LTC + DOGE)</strong> &mdash; one Scrypt session at an LTC pool (ltc.f2pool.com) that embeds Dogecoin blocks inside the Litecoin blocks it finds, so the same work is credited on both chains. You enter one login (your LTC address or a pool account worker such as <code>name.rig1</code>); set both payout addresses in that pool account. The pool builds the auxpow &mdash; this page only submits shares.</li>
+                <li><strong>Custom Pool</strong> &mdash; enter your own pool's host, port and worker login; your hashes are credited to that account.</li>
+              </ul>
+
+              <h3>Engines and expected speed</h3>
+              <p>
+                Bitcoin can use CPU Web Workers, the WebGPU (WGSL) SHA-256d kernel that scans millions of nonces per frame, or both at once. Litecoin, Dogecoin (Scrypt) and Monero (RandomX) are memory-hard by design and run on the CPU only &mdash; expect kilohashes per second for Scrypt and a handful of hashes per second for RandomX. More CPU threads means more speed and more heat.
+              </p>
+
+              <h3>Wallet addresses</h3>
+              <p>
+                Each coin validates its own address format before connecting, so a Bitcoin address can never credit a Litecoin, Dogecoin or Monero share. Use an address you control &mdash; payouts go directly to it.
+              </p>
+
+              <h3>How decentralized is it?</h3>
+              <p>
+                The work is real, but it routes through one proxy (the bridge), which limits autonomy compared with running a full node locally. Monero through P2Pool removes the pool operator, but the bridge still sits between your browser and the P2Pool node. This project is about making proof-of-work reachable from any browser, not about replacing dedicated mining hardware.
+              </p>
+
+              <h3>Is it safe?</h3>
+              <p>
+                Mining happens only while this tab is open and stops the moment you press Stop or close it. Nothing is installed and no private keys are ever requested &mdash; only a public receiving address. The console above logs every connection, job and share so you can see exactly what the page is doing.
+              </p>
+            </div>
+          </div>
+        </div>
+      </section>
     `;
 
     // Logic
@@ -245,6 +250,18 @@ function runMinerApp() {
       poolDashboard: document.getElementById("pool-dashboard"),
       modeMerged: document.getElementById("mode-merged"),
     };
+
+    // FAQ drop-down at the bottom of the panel.
+    (function () {
+        const faqBtn = document.getElementById('faq-toggle');
+        const faqBody = document.getElementById('faq-body');
+        if (!faqBtn || !faqBody) return;
+        faqBtn.addEventListener('click', () => {
+            const open = faqBody.classList.toggle('open');
+            faqBtn.setAttribute('aria-expanded', open ? 'true' : 'false');
+            if (open) setTimeout(() => faqBtn.scrollIntoView({ behavior: 'smooth', block: 'start' }), 60);
+        });
+    })();
 
     // ---- Coins -------------------------------------------------------------
     // One table drives the whole page: the proof of work the pool speaks, the
@@ -355,11 +372,11 @@ function runMinerApp() {
     // doing (and where shares go) without opening devtools.
     const MAX_LOG_LINES = 200;
     const LOG_COLORS = {
-        info: 'rgba(255, 255, 255, 0.82)',
-        ok: '#4caf50',
-        warn: '#ffb300',
-        error: '#ff5252',
-        pool: '#b892ff'
+        info: 'rgba(216, 245, 255, 0.82)',
+        ok: '#00ff66',
+        warn: '#ffb020',
+        error: '#ff2a4d',
+        pool: '#19a7ff'
     };
     function logLine(message, level) {
         try { console.log('[miner] ' + message); } catch (e) {}
@@ -1750,7 +1767,7 @@ function runMinerApp() {
         elements.stopBtn.disabled = false;
         elements.address.disabled = true;
         elements.device.disabled = true;
-        elements.status.style.color = "#7d3cff";
+        elements.status.style.color = "#00ff66";
 
         startUiLoop();
         if (deviceMode === 'cpu' || deviceMode === 'hybrid') startCpuMining();
