@@ -44,6 +44,7 @@ Everything the page hashes is a genuine candidate for a real block on a real net
 | **Live telemetry** | Hashrate, current block, network difficulty, share difficulty, best share, and a console that logs every connection, job and share |
 | **Bridge** | Stratum v1 and xmrig dialects relayed unchanged, so every share is credited to *your* login. No dev fee |
 | **UI** | Single page, themed like [tensors.vip](https://tensors.vip), with an FAQ drawer that explains every setting |
+| **Preset** | One click fills in the project's own receiving address for the selected coin, for benchmarking or for supporting the network without owning a wallet. Work mined with it is credited to the website |
 
 ## Supported coins
 
@@ -213,7 +214,7 @@ A few details that took real work, and that the tests protect:
 
 **Can it find a block?** In theory, every share is a genuine candidate. In practice the odds from a browser are astronomically small.
 
-**Where do my coins go?** Straight to the address you enter. No account is created and no private key is ever requested.
+**Where do my coins go?** Straight to the address you enter. No account is created and no private key is ever requested. The **Preset** button is the exception by design: it loads the project's own address, so that work is credited to the website. Use it to benchmark or to support the network, and enter your own address if you want any reward yourself.
 
 **Is there a dev fee?** No. The bridge relays messages unchanged, so every share is credited to your login.
 

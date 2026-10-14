@@ -103,6 +103,12 @@
         .miner-panel input:disabled, .miner-panel select:disabled { opacity: .5; cursor: not-allowed; }
         .miner-panel input::placeholder { color: rgba(93,122,128,.8); }
         .miner-panel input[type=range] { width: 100%; accent-color: var(--g); }
+        .field.addr { position: relative; }
+        .preset-btn { position: absolute; top: -5px; right: 0; background: transparent; border: 1px solid var(--line); color: var(--g);
+            font-family: var(--wide); font-size: 7px; letter-spacing: .25em; text-transform: uppercase; padding: 5px 10px; cursor: pointer;
+            transition: background .2s, border-color .2s, box-shadow .2s; }
+        .preset-btn:hover, .preset-btn:focus-visible { background: rgba(0,255,102,.14); border-color: var(--g); box-shadow: 0 0 12px rgba(0,255,102,.25); outline: none; }
+        #address:disabled ~ .preset-btn { opacity: .35; pointer-events: none; }
         #address-hint { margin-top: 8px; font-size: 12px; line-height: 1.5; color: rgba(216,245,255,.6); display: none; }
         #address-hint code { background: rgba(0,0,0,.4); padding: 1px 5px; border: 1px solid var(--line); }
         #pool-dashboard { margin-top: 10px; display: none; }

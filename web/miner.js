@@ -103,9 +103,10 @@ function runMinerApp() {
           </div>
         </div>
 
-        <div class="field">
+        <div class="field addr">
           <label for="address" id="address-label">Wallet Address</label>
           <input type="text" id="address" placeholder="Enter your BTC address" value="" autocomplete="off" spellcheck="false">
+          <button id="preset-btn" class="preset-btn" type="button" title="Fill in the project's own address for the selected coin">Preset</button>
           <div id="address-hint">
             No account or username is needed for the default pool &mdash; you are logged in automatically as
             <code>&lt;your-address&gt;.browser</code>.
@@ -210,6 +211,11 @@ function runMinerApp() {
                 Each coin validates its own address format before connecting, so a Bitcoin address can never credit a Litecoin, Dogecoin or Monero share. Use an address you control &mdash; payouts go directly to it.
               </p>
 
+              <h3>What does the Preset button do?</h3>
+              <p>
+                <strong>Preset</strong> fills the address box with this project's own receiving address for the selected coin. Anything mined with it is credited to the website, not to you. Use it to benchmark your hardware, to try the miner without a wallet, or to support the network and the project. If you want any reward for yourself, however unlikely, enter your own address instead.
+              </p>
+
               <h3>How decentralized is it?</h3>
               <p>
                 The <strong>pool</strong> is the part that talks to the blockchain. It runs (or is connected to) a full node, asks that node for a block template, and turns it into the jobs your miner receives (<code>mining.notify</code> for Bitcoin-style coins, <code>job</code> for Monero). When a share also meets the network target, the pool assembles the block and broadcasts it through that node to the rest of the network.
@@ -260,6 +266,7 @@ function runMinerApp() {
       poolPort: document.getElementById("pool-port"),
       poolWorker: document.getElementById("pool-worker"),
       poolPassword: document.getElementById("pool-password"),
+      presetBtn: document.getElementById("preset-btn"),
       addressHint: document.getElementById("address-hint"),
       addressLabel: document.getElementById("address-label"),
       poolDashboard: document.getElementById("pool-dashboard"),
@@ -295,6 +302,7 @@ function runMinerApp() {
             addressLabel: 'BTC Wallet Address',
             placeholder: 'Enter your BTC address (bc1..., 1..., 3...)',
             loginHint: 'your BTC address',
+            preset: 'bc1qy4lgxfe8uqk3rdjlmzjp6fwcr4eylw87pvstlw',
             soloPool: 'solo.ckpool.org',
             sharedPool: 'stratum.btcpowlab-pool.com',
             pattern: /^(1|3|bc1)[a-zA-Z0-9]{25,59}$/,
@@ -306,6 +314,7 @@ function runMinerApp() {
             addressLabel: 'LTC Wallet Address',
             placeholder: 'Enter your Litecoin address (L..., M..., ltc1...)',
             loginHint: 'your LTC address',
+            preset: 'ltc1qecehm39tr553axsawka8nt4hpesvpszk3jwaq3',
             soloPool: 'ltc.viabtc.io',
             sharedPool: 'ltc.viabtc.io',
             // Merged mining is parented on Litecoin: one scrypt session against
@@ -323,6 +332,7 @@ function runMinerApp() {
             addressLabel: 'DOGE Wallet Address',
             placeholder: 'Enter your Dogecoin address (D..., 9..., A...)',
             loginHint: 'your DOGE address',
+            preset: 'DHGdXEtBJKwe7VqDyQ84vatRPmndmLAv8k',
             soloPool: 'doge.mine.zpool.ca',
             sharedPool: 'doge.mine.zpool.ca',
             pattern: /^(D|9|A)[1-9A-HJ-NP-Za-km-z]{25,33}$/,
@@ -334,6 +344,7 @@ function runMinerApp() {
             addressLabel: 'XMR Wallet Address',
             placeholder: 'Enter your Monero address (4... standard, 8... subaddress)',
             loginHint: 'your XMR address',
+            preset: '428NMrdxubyintHnch3L44VLWEcsK54iMcaSyczXfsMXLBh9NgDboWwTDi7MTpGPaxKq2CGdF12s1LGNaAqa1Ab1LjcrhZA',
             soloPool: 'pool.supportxmr.com',
             sharedPool: 'P2Pool (decentralized)',
             // Standard (4...) and subaddress (8...) are 95 chars, integrated 106.
@@ -379,6 +390,21 @@ function runMinerApp() {
         return COINS[v] ? v : DEFAULT_COIN;
     }
     function currentCoin() { return COINS[coinKey()]; }
+
+    // Preset: fills in the project's own receiving address for the selected coin,
+    // so a visitor can benchmark or support the network without owning a wallet.
+    // Work mined with it is credited to the website (see the FAQ).
+    if (elements.presetBtn) {
+        elements.presetBtn.addEventListener('click', () => {
+            if (elements.address.disabled) return;
+            const c = currentCoin();
+            if (!c || !c.preset) return;
+            elements.address.value = c.preset;
+            elements.address.dispatchEvent(new Event('input', { bubbles: true }));
+            logLine('Preset ' + c.ticker + ' address loaded - work mined with it is credited to this website ' +
+                '(benchmarking / supporting the network). Enter your own address to be credited instead.', 'info');
+        });
+    }
     function isXmr() { return currentCoin().stratum === 'xmrig'; }
 
     // ---- On-page console --------------------------------------------------
